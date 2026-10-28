@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kitchen Sentinel Labeler</title>
+<style>
+  :root {
+    --bg: #111418; --panel: #1a1f26; --line: #2c333d; --text: #e6e9ee; --muted: #8b94a3;
+    --alert: #f2a33a; --event: #e5484d; --oops: #8b94a3; --ok: #3fb950; --accent: #4f8cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--line); }
+  .badge.recheck { background: #5a3e9e; }
+  .progress { flex: 1; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+  .progress > div { height: 100%; background: var(--ok); width: 0; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; padding: 16px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  video { width: 100%; max-height: 62vh; background: #000; border-radius: 6px; display: block; }
+  .timeline { position: relative; height: 34px; margin-top: 10px; background: var(--panel); border: 1px solid var(--line);
+              border-radius: 4px; cursor: pointer; }
+  .timeline .played { position: absolute; top: 0; bottom: 0; left: 0; background: #ffffff10; }
+  .timeline .window { position: absolute; top: 0; bottom: 0; background: #e5484d33; }
+  .timeline .mark { position: absolute; top: -4px; bottom: -4px; width: 3px; margin-left: -1px; }
+  .timeline .mark.oops { background: repeating-linear-gradient(var(--oops) 0 4px, transparent 4px 7px); }
+  .timeline .mark.alert { background: var(--alert); }
+  .timeline .mark.event { background: var(--event); }
+  .timeline .head { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #fff; }
+  .times { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px;
+           font-variant-numeric: tabular-nums; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin-bottom: 12px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  .title { font-weight: 600; word-break: break-word; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .marks div { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; }
+  .hazards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .hazards div { padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; font-size: 13px; }
+  .hazards div.on { border-color: var(--accent); background: #4f8cff22; }
+  kbd { font: 11px ui-monospace, monospace; background: var(--line); border-radius: 3px; padding: 1px 5px; }
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; font-size: 13px; }
+  #msg { min-height: 20px; margin-top: 8px; font-weight: 500; }
+  #msg.err { color: var(--event); } #msg.ok { color: var(--ok); }
+  .def { font-size: 13px; color: var(--muted); }
+  .def b { color: var(--text); }
+  .done-tag { color: var(--ok); font-size: 12px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kitchen Sentinel labeler</h1>
+  <span id="mode" class="badge">main</span>
+  <span id="count" class="meta"></span>
+  <div class="progress"><div id="bar"></div></div>
+</header>
+<main>
+  <section>
+    <video id="video" playsinline preload="auto"></video>
+    <div class="timeline" id="timeline">
+      <div class="played" id="played"></div>
+      <div class="window" id="window"></div>
+      <div class="mark oops" id="m-oops" title="Oops! annotators' failure time"></div>
+      <div class="mark alert" id="m-alert"></div>
+      <div class="mark event" id="m-event"></div>
+      <div class="head" id="head"></div>
+    </div>
+    <div class="times"><span id="t-now">0.00 s</span><span id="t-rate"></span><span id="t-dur">0.00 s</span></div>
+    <div id="msg"></div>
+  </section>
+  <aside>
+    <div class="panel">
+      <h2>Clip <span id="pos"></span><span id="donetag" class="done-tag"></span></h2>
+      <div class="title" id="title"></div>
+      <div class="meta" id="info"></div>
+    </div>
+    <div class="panel marks">
+      <h2>Marks</h2>
+      <div><span><span class="swatch" style="background:var(--alert)"></span>Alert <kbd>A</kbd></span><span id="v-alert">-</span></div>
+      <div><span><span class="swatch" style="background:var(--event)"></span>Event <kbd>E</kbd></span><span id="v-event">-</span></div>
+      <div><span>Warning window</span><span id="v-lead">-</span></div>
+    </div>
+    <div class="panel">
+      <h2>Hazard type</h2>
+      <div class="hazards" id="hazards"></div>
+    </div>
+    <div class="panel def">
+      <b>Alert</b> = the earliest moment a careful bystander would shout a warning: the towel touches the burner,
+      the knife hand slides toward the fingers, the pot handle juts out and an elbow is coming.
+      <b>Event</b> = the moment it goes wrong (pre-filled from Oops!, dashed line). <b>Benign</b> = a food-only
+      mishap with no injury or fire risk.
+    </div>
+    <div class="panel keys">
+      <kbd>Space</kbd><span>play / pause</span>
+      <kbd>← →</kbd><span>step one frame (<kbd>Shift</kbd> 0.5 s)</span>
+      <kbd>S</kbd><span>slow motion 0.25x</span>
+      <kbd>[ ]</kbd><span>jump to alert / event</span>
+      <kbd>K</kbd><span>keep + save + next (<kbd>Enter</kbd> too)</span>
+      <kbd>R</kbd><span>reject (not a kitchen hazard)</span>
+      <kbd>B</kbd><span>benign kitchen mishap</span>
+      <kbd>N P</kbd><span>next / previous without saving</span>
+    </div>
+  </aside>
+</main>
+<script>
+const HAZARDS = [["cut", "Cut"], ["burn_scald", "Burn / scald"], ["fire", "Fire / flare-up"],
+  ["falling_breaking", "Falling / breaking"], ["slip_fall", "Slip / fall"], ["appliance", "Appliance"],
+  ["impact", "Impact / hit"], ["other", "Other"]];
+const $ = id => document.getElementById(id);
+const video = $("video");
+let queue = null, idx = 0, marks = {};
+
+$("hazards").innerHTML = HAZARDS.map(([k, name], i) => `<div data-k="${k}"><kbd>${i + 1}</kbd> ${name}</div>`).join("");
+
+const num = v => (v === null || v === undefined || v === "") ? null : Number(v);
+const fmt = v => v === null ? "-" : v.toFixed(2) + " s";
+
+async function load(keepId) {
+  queue = await (await fetch("/api/queue")).json();
+  $("mode").textContent = queue.mode;
+  $("mode").className = "badge" + (queue.mode === "recheck" ? " recheck" : "");
+  const at = keepId ? queue.clips.findIndex(c => c.video_id === keepId) : -1;
+  idx = at >= 0 ? at : Math.max(0, queue.clips.findIndex(c => !c.done));
+  progress();
+  show();
+}
+
+function progress() {
+  $("count").textContent = `${queue.done} / ${queue.total} labeled`;
+  $("bar").style.width = (100 * queue.done / Math.max(1, queue.total)) + "%";
+}
+
+function show() {
+  const c = queue.clips[idx];
+  if (!c) { $("title").textContent = "Queue empty"; return; }
+  const l = c.label;
+  marks = {
+    alert: l ? num(l.time_of_alert) : null,
+    event: l && num(l.time_of_event) !== null ? num(l.time_of_event) : num(c.oops_event),
+    hazard: l ? l.hazard_type || null : null,
+  };
+  video.src = "/video/" + encodeURIComponent(c.video_id);
+  video.playbackRate = 1;
+  $("pos").textContent = `${idx + 1} / ${queue.clips.length}`;
+  $("donetag").textContent = c.done ? (l ? "labeled: " + l.decision : "done") : "";
+  $("title").textContent = c.video_id;
+  const oops = num(c.oops_event);
+  $("info").textContent = [
+    oops === null ? "no Oops! failure time" : `Oops! failure ${oops.toFixed(2)} s` +
+      (c.event_spread ? ` (annotators span ${Number(c.event_spread).toFixed(2)} s)` : ""),
+    c.kitchen_score ? `kitchen score ${Number(c.kitchen_score).toFixed(2)}` : "",
+    c.title_match === "True" ? "kitchen title" : "",
+  ].filter(Boolean).join(" · ");
+  say("");
+  render();
+}
+
+function render() {
+  const d = video.duration || 0;
+  const pct = t => d ? (100 * t / d) + "%" : "0";
+  const place = (el, t) => { el.style.display = t === null || !d ? "none" : "block"; if (t !== null) el.style.left = pct(t); };
+  place($("m-oops"), num(queue.clips[idx]?.oops_event));
+  place($("m-alert"), marks.alert);
+  place($("m-event"), marks.event);
+  $("head").style.left = pct(video.currentTime);
+  $("played").style.width = pct(video.currentTime);
+  const w = $("window");
+  if (marks.alert !== null && marks.event !== null && d) {
+    w.style.display = "block"; w.style.left = pct(marks.alert);
+    w.style.width = (100 * Math.max(0, marks.event - marks.alert) / d) + "%";
+  } else w.style.display = "none";
+  $("v-alert").textContent = fmt(marks.alert);
+  $("v-event").textContent = fmt(marks.event);
+  $("v-lead").textContent = marks.alert !== null && marks.event !== null ? fmt(marks.event - marks.alert) : "-";
+  $("t-now").textContent = video.currentTime.toFixed(2) + " s";
+  $("t-dur").textContent = d.toFixed(2) + " s";
+  $("t-rate").textContent = video.playbackRate !== 1 ? video.playbackRate + "x" : "";
+  document.querySelectorAll("#hazards div").forEach(el => el.classList.toggle("on", el.dataset.k === marks.hazard));
+}
+
+function say(text, kind) { $("msg").textContent = text; $("msg").className = kind || ""; }
+
+async function save(decision) {
+  const c = queue.clips[idx];
+  const body = { video_id: c.video_id, decision, duration: video.duration,
+    hazard_type: decision === "keep" ? marks.hazard : null,
+    time_of_alert: decision === "keep" ? marks.alert : null,
+    time_of_event: decision === "keep" ? marks.event : null };
+  const r = await fetch("/api/label", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const { errors } = await r.json();
+  if (errors.length) return say(errors.join("; "), "err");
+  const next = queue.clips.slice(idx + 1).find(x => !x.done) || queue.clips.find(x => !x.done && x.video_id !== c.video_id);
+  await load(next ? next.video_id : c.video_id);
+  say(`saved ${decision}: ${c.video_id}`, "ok");
+}
+
+function seek(t) { video.currentTime = Math.max(0, Math.min(video.duration || 0, t)); }
+
+document.addEventListener("keydown", e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key;
+  const handled = true;
+  if (k === " ") video.paused ? video.play() : video.pause();
+  else if (k === "ArrowLeft" || k === "ArrowRight") {
+    video.pause();
+    seek(video.currentTime + (k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 0.5 : 1 / 30));
+  }
+  else if (k === "s" || k === "S") video.playbackRate = video.playbackRate === 1 ? 0.25 : 1;
+  else if (k === "a" || k === "A") marks.alert = video.currentTime;
+  else if (k === "e" || k === "E") marks.event = video.currentTime;
+  else if (k === "[") { if (marks.alert !== null) seek(marks.alert); }
+  else if (k === "]") { if (marks.event !== null) seek(marks.event); }
+  else if (k >= "1" && k <= "8") marks.hazard = HAZARDS[Number(k) - 1][0];
+  else if (k === "k" || k === "K" || k === "Enter") save("keep");
+  else if (k === "r" || k === "R") save("reject");
+  else if (k === "b" || k === "B") save("benign");
+  else if (k === "n" || k === "N") { idx = Math.min(queue.clips.length - 1, idx + 1); show(); }
+  else if (k === "p" || k === "P") { idx = Math.max(0, idx - 1); show(); }
+  else return;
+  if (handled) e.preventDefault();
+  render();
+});
+
+$("timeline").addEventListener("click", e => {
+  const r = e.currentTarget.getBoundingClientRect();
+  seek((e.clientX - r.left) / r.width * (video.duration || 0));
+});
+["timeupdate", "loadedmetadata", "seeked", "ratechange"].forEach(ev => video.addEventListener(ev, render));
+(function tick() { if (!video.paused) render(); requestAnimationFrame(tick); })();
+load();
+</script>
+</body>
+</html>
