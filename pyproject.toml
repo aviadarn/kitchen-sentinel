@@ -1,0 +1,38 @@
+[project]
+name = "kitchen-sentinel"
+version = "0.1.0"
+description = "BADAS-style accident anticipation for kitchens: collect, label, train and evaluate in one repo"
+readme = "README.md"
+requires-python = "==3.12.*"
+dependencies = [
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Heavy stack: only needed for feature extraction, training and model checks.
+model = [
+    "torch>=2.5",
+    "torchvision>=0.20",
+    "transformers>=4.53",
+    "huggingface-hub>=0.34",
+    "av>=13.0",
+]
+
+[project.scripts]
+ks = "ks.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ks"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
