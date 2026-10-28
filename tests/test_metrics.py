@@ -67,6 +67,13 @@ def test_false_alarms_merges_edges_inside_refractory():
     assert false_alarms(FA_TIMES, FA_PROBS, tau=0.5, refractory=3.5) == 2
 
 
+def test_false_alarms_sustained_danger_re_alarms_every_refractory_period():
+    # Stuck above threshold for 10 s: a device keeps warning (0, 2, 4, 6, 8), it doesn't go quiet.
+    # Counting only rising edges would let a model that is always "on" score 1 alarm per hour.
+    times = [float(t) for t in range(10)]
+    assert false_alarms(times, [0.9] * 10, tau=0.5, refractory=2.0) == 5
+
+
 def test_false_alarms_counts_alarm_on_first_sample():
     assert false_alarms([0.0, 1.0], [0.9, 0.9], tau=0.5, refractory=2.0) == 1
 

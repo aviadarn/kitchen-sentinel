@@ -27,18 +27,17 @@ def mean_tta(curves, tau):
 
 
 def false_alarms(times, probs, tau, refractory=2.0):
-    """Alarms on a negative video: rising edges of P >= tau, at most one per `refractory` seconds.
+    """Alarms on a negative video: any time P >= tau, at most one per `refractory` seconds.
 
-    A sustained high probability is one alarm. An edge within `refractory` of the last counted alarm
-    is merged into it, the way a device would not re-sound a warning it just gave.
+    Within the refractory period after an alarm the device stays quiet; if P is still (or again)
+    above tau after it, the device warns again. A model stuck "on" therefore pays for every period,
+    rather than once per rising edge.
     """
-    count, last_alarm, was_above = 0, None, False
+    count, last_alarm = 0, None
     for t, p in zip(times, probs):
-        above = p >= tau
-        if above and not was_above and (last_alarm is None or t - last_alarm >= refractory):
+        if p >= tau and (last_alarm is None or t - last_alarm >= refractory):
             count += 1
             last_alarm = t
-        was_above = above
     return count
 
 
