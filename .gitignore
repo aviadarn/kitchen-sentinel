@@ -5,10 +5,10 @@ __pycache__/
 *.egg-info/
 
 # Video, features and checkpoints never go in git (see README "Data rights").
-data/
-features/
-checkpoints/
-runs/
+/data/
+/features/
+/checkpoints/
+/runs/
 *.mp4
 *.avi
 *.npy
