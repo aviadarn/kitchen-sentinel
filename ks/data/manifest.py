@@ -1,12 +1,44 @@
-"""The unified video manifest (one row per video, all sources) and its validation."""
+"""The unified video manifest (one row per video, all sources) and its validation.
+
+A positive video carries `events`: a JSON list of {"alert", "event", "hazard"}, one per accident in the
+clip (some fails contain several). A negative video has "[]".
+"""
+
+import json
 
 import pandas as pd
 
-COLUMNS = [
-    "video_id", "source", "path", "view", "group", "split", "label",
-    "time_of_event", "time_of_alert", "hazard_type", "duration",
-]
+COLUMNS = ["video_id", "source", "path", "view", "group", "split", "label", "events", "duration"]
 HAZARD_TYPES = {"cut", "burn_scald", "fire", "falling_breaking", "slip_fall", "appliance", "impact", "other"}
+
+
+def parse_events(events):
+    """JSON string or list -> list of event dicts."""
+    return json.loads(events) if isinstance(events, str) else list(events or [])
+
+
+def check_events(events, duration):
+    """Problems with a kept clip's events (empty list = fine). Shared by the labeler and the manifest."""
+    if not events:
+        return ["mark at least one event (A, E, 1-8)"]
+    errors = []
+    for i, e in enumerate(events, 1):
+        alert, event = e.get("alert"), e.get("event")
+        if e.get("hazard") not in HAZARD_TYPES:
+            errors.append(f"event {i}: pick a hazard type (1-8)")
+        if alert is None or event is None:
+            errors.append(f"event {i}: mark both alert (A) and event (E)")
+        elif not 0 <= alert < event <= duration:
+            errors.append(f"event {i}: need 0 <= alert ({alert:.2f}) < event ({event:.2f}) <= clip length "
+                          f"({duration:.2f})")
+    if errors:
+        return errors
+    ordered = sorted(events, key=lambda e: e["alert"])
+    for a, b in zip(ordered, ordered[1:]):
+        if a["event"] > b["alert"]:
+            errors.append(f"events overlap: one warning starts ({b['alert']:.2f}) before the previous accident "
+                          f"({a['event']:.2f})")
+    return errors
 
 
 def validate(df):
@@ -18,18 +50,12 @@ def validate(df):
     errors = [f"duplicate video_id: {v}" for v in df.loc[df.video_id.duplicated(), "video_id"].unique()]
 
     for r in df.itertuples(index=False):
-        has_alert, has_event = not pd.isna(r.time_of_alert), not pd.isna(r.time_of_event)
+        events = parse_events(r.events)
         if r.label == 1:
-            if not (has_alert and has_event):
-                errors.append(f"{r.video_id}: positive needs time_of_alert and time_of_event")
-            elif not 0 <= r.time_of_alert < r.time_of_event <= r.duration:
-                errors.append(f"{r.video_id}: need 0 <= alert ({r.time_of_alert}) < event ({r.time_of_event}) "
-                              f"<= duration ({r.duration})")
-            if r.hazard_type not in HAZARD_TYPES:
-                errors.append(f"{r.video_id}: hazard_type {r.hazard_type!r} not in {sorted(HAZARD_TYPES)}")
+            errors += [f"{r.video_id}: {e}" for e in check_events(events, r.duration)]
         elif r.label == 0:
-            if has_alert or has_event:
-                errors.append(f"{r.video_id}: negative must not have alert/event times")
+            if events:
+                errors.append(f"{r.video_id}: negative must not have events")
         else:
             errors.append(f"{r.video_id}: label must be 0 or 1, got {r.label!r}")
 

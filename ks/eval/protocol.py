@@ -1,8 +1,12 @@
 """Evaluation sets built from per-window predictions.
 
 `preds` has one row per window: video_id, group, video_label (1 = positive video), t_end, window_label
-(1 / 0 / NaN for windows the training labels drop), score, time_of_alert, time_of_event, duration.
+(1 / 0 / NaN for windows the training labels drop), score, events, duration. `events` lists the clip's
+accidents as (alert, event) pairs or the manifest's JSON; a clip may hold several, and warning time and
+the easy set are computed per accident.
 """
+
+import json
 
 import numpy as np
 
@@ -15,32 +19,42 @@ def hard_set(preds):
     return p.window_label.astype(int).to_numpy(), p.score.to_numpy(), p.group.to_numpy()
 
 
+def event_times(events):
+    """Sorted accident times from (alert, event) pairs, event dicts, or their JSON."""
+    if isinstance(events, str):
+        events = json.loads(events)
+    return sorted(e["event"] if isinstance(e, dict) else e[1] for e in events)
+
+
 def easy_set(preds, offset, tolerance=0.13):
-    """BADAS/Nexar-style: per positive video, the window ending `offset` s before the event, against
-    every window of the negative videos. Inflated by any source shortcut; reported next to hard_set."""
+    """BADAS/Nexar-style: per accident, the window ending `offset` s before it, against every window of
+    the negative videos. Inflated by any source shortcut; reported next to hard_set."""
     pos_y, pos_s, pos_g = [], [], []
     for _, v in preds[preds.video_label == 1].groupby("video_id", sort=True):
-        target = v.time_of_event.iloc[0] - offset
-        gap = (v.t_end - target).abs()
-        if gap.min() <= tolerance:
-            w = v.loc[gap.idxmin()]
-            pos_y.append(1), pos_s.append(w.score), pos_g.append(w.group)
+        for event in event_times(v.events.iloc[0]):
+            gap = (v.t_end - (event - offset)).abs()
+            if gap.min() <= tolerance:
+                w = v.loc[gap.idxmin()]
+                pos_y.append(1), pos_s.append(w.score), pos_g.append(w.group)
     neg = preds[preds.video_label == 0].sort_values(["video_id", "t_end"])
     return (np.array(pos_y + [0] * len(neg), dtype=int), np.concatenate([pos_s, neg.score.to_numpy()]),
             np.concatenate([pos_g, neg.group.to_numpy()]))
 
 
 def risk_curves(preds, positive):
-    """Positive videos -> (times, probs, event) up to the event; negatives -> (times, probs, duration)."""
+    """Positive videos -> one (times, probs, event) per accident, over the windows after the previous
+    accident up to this one; negatives -> (times, probs, duration)."""
     curves = []
     for _, v in preds[preds.video_label == (1 if positive else 0)].groupby("video_id", sort=True):
         v = v.sort_values("t_end")
-        if positive:
-            event = float(v.time_of_event.iloc[0])
-            v = v[v.t_end <= event]
-            curves.append((v.t_end.tolist(), v.score.tolist(), event))
-        else:
+        if not positive:
             curves.append((v.t_end.tolist(), v.score.tolist(), float(v.duration.iloc[0])))
+            continue
+        previous = -np.inf
+        for event in event_times(v.events.iloc[0]):
+            seg = v[(v.t_end > previous) & (v.t_end <= event)]
+            curves.append((seg.t_end.tolist(), seg.score.tolist(), float(event)))
+            previous = event
     return curves
 
 

@@ -7,11 +7,12 @@
 
 import argparse
 import csv
+import json
 from pathlib import Path, PurePosixPath
 
 import pandas as pd
 
-from ks.data.manifest import COLUMNS, validate
+from ks.data.manifest import COLUMNS, parse_events, validate
 from ks.data.splits import assign_splits
 
 FRACTIONS = {"train": 0.70, "val": 0.15, "test": 0.15}
@@ -26,14 +27,12 @@ def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed):
             continue
         rows.append({
             "video_id": c["video_id"], "source": "oops", "path": f"{oops_dir}/{c['video_id']}.mp4", "view": "mixed",
-            "group": c["group"], "label": 1, "time_of_event": float(label["time_of_event"]),
-            "time_of_alert": float(label["time_of_alert"]), "hazard_type": label["hazard_type"],
+            "group": c["group"], "label": 1, "events": json.dumps(parse_events(label["events"])),
             "duration": float(label["duration"]),
         })
     for n in negatives:
         rows.append({**{k: n[k] for k in ("video_id", "source", "path", "view", "group")}, "label": 0,
-                     "time_of_event": None, "time_of_alert": None, "hazard_type": None,
-                     "duration": float(n["duration"])})
+                     "events": "[]", "duration": float(n["duration"])})
 
     df = pd.DataFrame(rows)
     # Split each source separately so every split gets its share of positives, ego and third-person
@@ -75,9 +74,17 @@ def main():
     df.to_csv(a.out, index=False)
     Path(a.out).with_suffix(".summary.txt").write_text(
         pd.crosstab([df.source, df.label], df.split).to_string() + "\n\n"
-        + df[df.label == 1].hazard_type.value_counts().to_string() + "\n")
+        + hazard_counts(df).to_string() + "\n")
     print(pd.crosstab([df.source, df.label], df.split))
-    print(df[df.label == 1].hazard_type.value_counts())
+    print(hazard_counts(df))
+
+
+def hazard_counts(df):
+    """Events per hazard type, plus how many clips hold more than one event."""
+    events = [parse_events(e) for e in df[df.label == 1].events]
+    counts = pd.Series([e["hazard"] for evs in events for e in evs]).value_counts()
+    counts["(clips with 2+ events)"] = sum(len(evs) > 1 for evs in events)
+    return counts
 
 
 if __name__ == "__main__":

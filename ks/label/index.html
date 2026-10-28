@@ -28,6 +28,11 @@
   .timeline .mark.oops { background: repeating-linear-gradient(var(--oops) 0 4px, transparent 4px 7px); }
   .timeline .mark.alert { background: var(--alert); }
   .timeline .mark.event { background: var(--event); }
+  .timeline .dim { opacity: .35; }
+  .evrow { display: grid; grid-template-columns: 22px 1fr 1fr 1.4fr; gap: 6px; padding: 3px 4px; border-radius: 4px;
+           font-variant-numeric: tabular-nums; font-size: 13px; }
+  .evrow.on { background: #4f8cff22; outline: 1px solid var(--accent); }
+  .evrow .n { color: var(--muted); }
   .timeline .head { position: absolute; top: -6px; bottom: -6px; width: 2px; background: #fff; }
   .times { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 4px;
            font-variant-numeric: tabular-nums; }
@@ -61,10 +66,8 @@
     <video id="video" playsinline preload="auto"></video>
     <div class="timeline" id="timeline">
       <div class="played" id="played"></div>
-      <div class="window" id="window"></div>
+      <div id="evmarks"></div>
       <div class="mark oops" id="m-oops" title="Oops! annotators' failure time"></div>
-      <div class="mark alert" id="m-alert"></div>
-      <div class="mark event" id="m-event"></div>
       <div class="head" id="head"></div>
     </div>
     <div class="times"><span id="t-now">0.00 s</span><span id="t-rate"></span><span id="t-dur">0.00 s</span></div>
@@ -77,10 +80,10 @@
       <div class="meta" id="info"></div>
     </div>
     <div class="panel marks">
-      <h2>Marks</h2>
-      <div><span><span class="swatch" style="background:var(--alert)"></span>Alert <kbd>A</kbd></span><span id="v-alert">-</span></div>
-      <div><span><span class="swatch" style="background:var(--event)"></span>Event <kbd>E</kbd></span><span id="v-event">-</span></div>
-      <div><span>Warning window</span><span id="v-lead">-</span></div>
+      <h2>Events <span class="meta">(<kbd>M</kbd> add · <kbd>Tab</kbd> switch · <kbd>X</kbd> delete)</span></h2>
+      <div class="evrow n"><span>#</span><span><span class="swatch" style="background:var(--alert)"></span>Alert <kbd>A</kbd></span>
+        <span><span class="swatch" style="background:var(--event)"></span>Event <kbd>E</kbd></span><span>Hazard <kbd>1-8</kbd></span></div>
+      <div id="evlist"></div>
     </div>
     <div class="panel">
       <h2>Hazard type</h2>
@@ -90,13 +93,17 @@
       <b>Alert</b> = the earliest moment a careful bystander would shout a warning: the towel touches the burner,
       the knife hand slides toward the fingers, the pot handle juts out and an elbow is coming.
       <b>Event</b> = the moment it goes wrong (pre-filled from Oops!, dashed line). <b>Benign</b> = a food-only
-      mishap with no injury or fire risk.
+      mishap with no injury or fire risk. <b>Several accidents in one clip?</b> Press <kbd>M</kbd> after
+      finishing one to mark the next; each gets its own alert, event and hazard.
     </div>
     <div class="panel keys">
       <kbd>Space</kbd><span>play / pause</span>
       <kbd>← →</kbd><span>step one frame (<kbd>Shift</kbd> 0.5 s)</span>
       <kbd>S</kbd><span>slow motion 0.25x</span>
-      <kbd>[ ]</kbd><span>jump to alert / event</span>
+      <kbd>[ ]</kbd><span>jump to alert / event of the active event</span>
+      <kbd>M</kbd><span>add another event (several accidents in one clip)</span>
+      <kbd>Tab</kbd><span>switch active event (<kbd>Shift</kbd> back)</span>
+      <kbd>X</kbd><span>delete active event</span>
       <kbd>K</kbd><span>keep + save + next (<kbd>Enter</kbd> too)</span>
       <kbd>R</kbd><span>reject (not a kitchen hazard)</span>
       <kbd>B</kbd><span>benign kitchen mishap</span>
@@ -110,7 +117,7 @@ const HAZARDS = [["cut", "Cut"], ["burn_scald", "Burn / scald"], ["fire", "Fire 
   ["impact", "Impact / hit"], ["other", "Other"]];
 const $ = id => document.getElementById(id);
 const video = $("video");
-let queue = null, idx = 0, marks = {};
+let queue = null, idx = 0, events = [], active = 0;
 
 $("hazards").innerHTML = HAZARDS.map(([k, name], i) => `<div data-k="${k}"><kbd>${i + 1}</kbd> ${name}</div>`).join("");
 
@@ -136,11 +143,10 @@ function show() {
   const c = queue.clips[idx];
   if (!c) { $("title").textContent = "Queue empty"; return; }
   const l = c.label;
-  marks = {
-    alert: l ? num(l.time_of_alert) : null,
-    event: l && num(l.time_of_event) !== null ? num(l.time_of_event) : num(c.oops_event),
-    hazard: l ? l.hazard_type || null : null,
-  };
+  const saved = l && l.events ? JSON.parse(l.events) : [];
+  events = saved.length ? saved.map(e => ({ alert: e.alert, event: e.event, hazard: e.hazard }))
+                        : [{ alert: null, event: num(c.oops_event), hazard: null }];
+  active = 0;
   video.src = "/video/" + encodeURIComponent(c.video_id);
   video.playbackRate = 1;
   $("pos").textContent = `${idx + 1} / ${queue.clips.length}`;
@@ -162,22 +168,25 @@ function render() {
   const pct = t => d ? (100 * t / d) + "%" : "0";
   const place = (el, t) => { el.style.display = t === null || !d ? "none" : "block"; if (t !== null) el.style.left = pct(t); };
   place($("m-oops"), num(queue.clips[idx]?.oops_event));
-  place($("m-alert"), marks.alert);
-  place($("m-event"), marks.event);
   $("head").style.left = pct(video.currentTime);
   $("played").style.width = pct(video.currentTime);
-  const w = $("window");
-  if (marks.alert !== null && marks.event !== null && d) {
-    w.style.display = "block"; w.style.left = pct(marks.alert);
-    w.style.width = (100 * Math.max(0, marks.event - marks.alert) / d) + "%";
-  } else w.style.display = "none";
-  $("v-alert").textContent = fmt(marks.alert);
-  $("v-event").textContent = fmt(marks.event);
-  $("v-lead").textContent = marks.alert !== null && marks.event !== null ? fmt(marks.event - marks.alert) : "-";
+  $("evmarks").innerHTML = d ? events.map((e, i) => {
+    const dim = i === active ? "" : " dim";
+    let html = "";
+    if (e.alert !== null && e.event !== null)
+      html += `<div class="window${dim}" style="left:${pct(e.alert)};width:${100 * Math.max(0, e.event - e.alert) / d}%"></div>`;
+    if (e.alert !== null) html += `<div class="mark alert${dim}" style="left:${pct(e.alert)}"></div>`;
+    if (e.event !== null) html += `<div class="mark event${dim}" style="left:${pct(e.event)}"></div>`;
+    return html;
+  }).join("") : "";
+  const hname = k => (HAZARDS.find(h => h[0] === k) || [null, "-"])[1];
+  $("evlist").innerHTML = events.map((e, i) =>
+    `<div class="evrow${i === active ? " on" : ""}"><span class="n">${i + 1}</span><span>${fmt(e.alert)}</span>` +
+    `<span>${fmt(e.event)}</span><span>${hname(e.hazard)}</span></div>`).join("");
   $("t-now").textContent = video.currentTime.toFixed(2) + " s";
   $("t-dur").textContent = d.toFixed(2) + " s";
   $("t-rate").textContent = video.playbackRate !== 1 ? video.playbackRate + "x" : "";
-  document.querySelectorAll("#hazards div").forEach(el => el.classList.toggle("on", el.dataset.k === marks.hazard));
+  document.querySelectorAll("#hazards div").forEach(el => el.classList.toggle("on", el.dataset.k === events[active]?.hazard));
 }
 
 function say(text, kind) { $("msg").textContent = text; $("msg").className = kind || ""; }
@@ -185,9 +194,7 @@ function say(text, kind) { $("msg").textContent = text; $("msg").className = kin
 async function save(decision) {
   const c = queue.clips[idx];
   const body = { video_id: c.video_id, decision, duration: video.duration,
-    hazard_type: decision === "keep" ? marks.hazard : null,
-    time_of_alert: decision === "keep" ? marks.alert : null,
-    time_of_event: decision === "keep" ? marks.event : null };
+    events: decision === "keep" ? events : [] };
   const r = await fetch("/api/label", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const { errors } = await r.json();
   if (errors.length) return say(errors.join("; "), "err");
@@ -208,11 +215,18 @@ document.addEventListener("keydown", e => {
     seek(video.currentTime + (k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 0.5 : 1 / 30));
   }
   else if (k === "s" || k === "S") video.playbackRate = video.playbackRate === 1 ? 0.25 : 1;
-  else if (k === "a" || k === "A") marks.alert = video.currentTime;
-  else if (k === "e" || k === "E") marks.event = video.currentTime;
-  else if (k === "[") { if (marks.alert !== null) seek(marks.alert); }
-  else if (k === "]") { if (marks.event !== null) seek(marks.event); }
-  else if (k >= "1" && k <= "8") marks.hazard = HAZARDS[Number(k) - 1][0];
+  else if (k === "a" || k === "A") events[active].alert = video.currentTime;
+  else if (k === "e" || k === "E") events[active].event = video.currentTime;
+  else if (k === "[") { if (events[active].alert !== null) seek(events[active].alert); }
+  else if (k === "]") { if (events[active].event !== null) seek(events[active].event); }
+  else if (k >= "1" && k <= "8") events[active].hazard = HAZARDS[Number(k) - 1][0];
+  else if (k === "m" || k === "M") { events.push({ alert: null, event: null, hazard: null }); active = events.length - 1;
+    say(`event ${active + 1}: mark its alert (A), event (E) and hazard (1-8)`); }
+  else if (k === "Tab") active = (active + (e.shiftKey ? events.length - 1 : 1)) % events.length;
+  else if (k === "x" || k === "X") {
+    if (events.length > 1) { events.splice(active, 1); active = Math.min(active, events.length - 1); }
+    else events[0] = { alert: null, event: null, hazard: null };
+  }
   else if (k === "k" || k === "K" || k === "Enter") save("keep");
   else if (k === "r" || k === "R") save("reject");
   else if (k === "b" || k === "B") save("benign");

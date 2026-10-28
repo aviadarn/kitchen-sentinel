@@ -1,6 +1,10 @@
+import csv
+import json
+
 import pytest
 
-from ks.label.server import latest_labels, parse_range, queue_order, recheck_sample, validate_label
+from ks.label.server import (latest_labels, migrate_labels_csv, parse_range, queue_order, recheck_sample,
+                             validate_label)
 
 
 @pytest.mark.parametrize(
@@ -20,9 +24,12 @@ def test_parse_range(header, want):
     assert parse_range(header, size=1000) == want
 
 
-def keep(**over):
-    base = {"video_id": "v1", "decision": "keep", "hazard_type": "cut", "time_of_alert": 2.0, "time_of_event": 3.5,
-            "duration": 8.0}
+def ev(alert=2.0, event=3.5, hazard="cut"):
+    return {"alert": alert, "event": event, "hazard": hazard}
+
+
+def keep(events=None, **over):
+    base = {"video_id": "v1", "decision": "keep", "events": [ev()] if events is None else events, "duration": 8.0}
     base.update(over)
     return base
 
@@ -31,25 +38,50 @@ def test_valid_keep_label_passes():
     assert validate_label(keep()) == []
 
 
+def test_two_events_in_one_clip_pass():
+    assert validate_label(keep([ev(1.0, 2.0, "cut"), ev(4.0, 6.5, "fire")])) == []
+
+
 @pytest.mark.parametrize(
-    "over",
+    "events",
     [
-        {"hazard_type": None},
-        {"hazard_type": "explosion"},
-        {"time_of_alert": None},
-        {"time_of_event": None},
-        {"time_of_alert": 4.0},          # alert after event
-        {"time_of_event": 9.0},          # event past the end of the clip
-        {"decision": "maybe"},
+        [],                                          # keep needs at least one event
+        [ev(hazard=None)],
+        [ev(hazard="explosion")],
+        [ev(alert=None)],
+        [ev(event=None)],
+        [ev(alert=4.0)],                             # alert after event
+        [ev(event=9.0)],                             # event past the end of the clip
+        [ev(1.0, 3.0), ev(2.5, 5.0, "fire")],        # second warning starts before the first accident
     ],
 )
-def test_invalid_labels_are_rejected(over):
-    assert len(validate_label(keep(**over))) == 1
+def test_invalid_events_are_rejected(events):
+    assert len(validate_label(keep(events))) == 1
 
 
-def test_reject_and_benign_need_no_times():
+def test_unknown_decision_is_rejected():
+    assert len(validate_label(keep(decision="maybe"))) == 1
+
+
+def test_reject_and_benign_need_no_events():
     assert validate_label({"video_id": "v1", "decision": "reject", "duration": 8.0}) == []
     assert validate_label({"video_id": "v1", "decision": "benign", "duration": 8.0}) == []
+
+
+def test_migrate_converts_single_event_rows_and_keeps_a_backup(tmp_path):
+    old = tmp_path / "labels.csv"
+    old.write_text(
+        "video_id,decision,hazard_type,time_of_alert,time_of_event,duration,pass,labeler,labeled_at\n"
+        "a,keep,burn_scald,1.5,3.34,6.53,main,aviad,2026-10-28T19:00:00+00:00\n"
+        "b,reject,,,,6.0,main,aviad,2026-10-28T19:01:00+00:00\n")
+    migrate_labels_csv(old)
+    rows = list(csv.DictReader(old.open()))
+    assert json.loads(rows[0]["events"]) == [{"alert": 1.5, "event": 3.34, "hazard": "burn_scald"}]
+    assert (rows[0]["decision"], rows[0]["duration"], rows[0]["labeled_at"]) == ("keep", "6.53", "2026-10-28T19:00:00+00:00")
+    assert json.loads(rows[1]["events"]) == []
+    assert (tmp_path / "labels.csv.bak").read_text().startswith("video_id,decision,hazard_type")
+    migrate_labels_csv(old)  # second run is a no-op
+    assert list(csv.DictReader(old.open())) == rows
 
 
 def test_latest_label_per_clip_wins():

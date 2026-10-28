@@ -4,6 +4,8 @@
         --labels data/labels.csv [--recheck 50]
 
 Labels are appended to labels.csv and never edited in place; the latest main-pass row per clip wins.
+A kept clip carries one or more events (some fails contain several accidents), stored as a JSON list
+of {"alert", "event", "hazard"} in the `events` column.
 --recheck re-serves a fixed random sample of kept clips with the earlier answers hidden, to measure
 how consistently one labeler places the alert time (BADAS used 10 raters; we have one).
 """
@@ -13,15 +15,15 @@ import csv
 import json
 import random
 import re
+import shutil
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote
 
-from ks.data.manifest import HAZARD_TYPES
+from ks.data.manifest import check_events
 
-LABEL_FIELDS = ["video_id", "decision", "hazard_type", "time_of_alert", "time_of_event", "duration", "pass",
-                "labeler", "labeled_at"]
+LABEL_FIELDS = ["video_id", "decision", "events", "duration", "pass", "labeler", "labeled_at"]
 DECISIONS = {"keep", "reject", "benign"}
 RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)$")
 
@@ -45,15 +47,29 @@ def validate_label(label):
         return [f"decision must be one of {sorted(DECISIONS)}"]
     if label["decision"] != "keep":
         return []
-    errors = []
-    if label.get("hazard_type") not in HAZARD_TYPES:
-        errors.append("pick a hazard type (1-8)")
-    alert, event = label.get("time_of_alert"), label.get("time_of_event")
-    if alert is None or event is None:
-        errors.append("mark both alert (A) and event (E)")
-    elif not 0 <= alert < event <= label["duration"]:
-        errors.append(f"need 0 <= alert ({alert:.2f}) < event ({event:.2f}) <= clip length ({label['duration']:.2f})")
-    return errors
+    return check_events(label.get("events") or [], label["duration"])
+
+
+def migrate_labels_csv(path):
+    """Rewrite a pre-multi-event labels.csv (hazard_type / time_of_alert / time_of_event columns) to the
+    `events` format, keeping the original as labels.csv.bak. No-op on an already migrated file."""
+    path = Path(path)
+    with path.open() as f:
+        reader = csv.DictReader(f)
+        if "events" in reader.fieldnames:
+            return
+        old = list(reader)
+    shutil.copy(path, path.with_name(path.name + ".bak"))
+    rows = []
+    for r in old:
+        events = []
+        if r["decision"] == "keep" and r["time_of_alert"] and r["time_of_event"]:
+            events = [{"alert": float(r["time_of_alert"]), "event": float(r["time_of_event"]), "hazard": r["hazard_type"]}]
+        rows.append({**{k: r[k] for k in LABEL_FIELDS if k in r}, "events": json.dumps(events)})
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_FIELDS)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def latest_labels(rows):
@@ -85,7 +101,9 @@ class LabelStore:
         self.labels_csv = Path(labels_csv)
         self.labeler = labeler
         self.recheck = recheck
-        if not self.labels_csv.exists():
+        if self.labels_csv.exists():
+            migrate_labels_csv(self.labels_csv)
+        else:
             with self.labels_csv.open("w", newline="") as f:
                 csv.DictWriter(f, fieldnames=LABEL_FIELDS).writeheader()
 
@@ -111,6 +129,8 @@ class LabelStore:
         if errors:
             return errors
         row = {k: label.get(k) for k in LABEL_FIELDS}
+        events = sorted(label.get("events") or [], key=lambda e: e["alert"]) if label["decision"] == "keep" else []
+        row["events"] = json.dumps([{"alert": e["alert"], "event": e["event"], "hazard": e["hazard"]} for e in events])
         row.update({"pass": "recheck" if self.recheck else "main", "labeler": self.labeler,
                     "labeled_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         with self.labels_csv.open("a", newline="") as f:

@@ -1,3 +1,5 @@
+import json
+
 from ks.data.build import build_manifest
 from ks.data.manifest import validate
 
@@ -9,12 +11,12 @@ CANDIDATES = [
     {"video_id": "Comp D2", "group": "Comp D"},
 ]
 LABELS = {
-    "Comp A0": {"decision": "keep", "hazard_type": "cut", "time_of_alert": "1.5", "time_of_event": "3.0", "duration": "6.0"},
-    "Comp A1": {"decision": "reject"},
-    "Comp B3": {"decision": "benign"},
-    "Comp C9": {"decision": "keep", "hazard_type": "fire", "time_of_alert": "2.0", "time_of_event": "4.5", "duration": "9.0"},
-    "Comp D2": {"decision": "keep", "hazard_type": "burn_scald", "time_of_alert": "1.0", "time_of_event": "2.0",
-                "duration": "5.0"},
+    "Comp A0": {"decision": "keep", "duration": "6.0",
+                "events": '[{"alert": 1.5, "event": 3.0, "hazard": "cut"}, {"alert": 4.0, "event": 5.5, "hazard": "fire"}]'},
+    "Comp A1": {"decision": "reject", "events": "[]"},
+    "Comp B3": {"decision": "benign", "events": "[]"},
+    "Comp C9": {"decision": "keep", "duration": "9.0", "events": '[{"alert": 2.0, "event": 4.5, "hazard": "fire"}]'},
+    "Comp D2": {"decision": "keep", "duration": "5.0", "events": '[{"alert": 1.0, "event": 2.0, "hazard": "burn_scald"}]'},
 }
 NEGATIVES = [
     {"video_id": "epic:P01_102", "source": "epic", "path": "n/epic/P01_102.mp4", "view": "ego", "group": "epic:P01",
@@ -35,7 +37,9 @@ def test_only_kept_clips_become_positives():
     pos = df[df.label == 1]
     assert sorted(pos.video_id) == ["Comp A0", "Comp C9", "Comp D2"]
     a0 = pos.set_index("video_id").loc["Comp A0"]
-    assert (a0.time_of_alert, a0.time_of_event, a0.hazard_type, a0.duration) == (1.5, 3.0, "cut", 6.0)
+    assert json.loads(a0.events) == [{"alert": 1.5, "event": 3.0, "hazard": "cut"},
+                                     {"alert": 4.0, "event": 5.5, "hazard": "fire"}]
+    assert a0.duration == 6.0
     assert a0.path == "n/oops/Comp A0.mp4"
     assert a0.source == "oops" and a0.view == "mixed"
 
