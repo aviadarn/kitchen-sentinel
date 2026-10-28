@@ -69,3 +69,11 @@ def test_sample_windows_positive_needs_context_before_alert():
     # before t=0 except those ending at >= 2.0 s.
     got = sample_windows(duration=3.0, alert=1.0, event=2.5, fps=8.0, num_frames=16, stride_frames=4)
     assert [(w.t_end, w.label) for w in got] == [(2.0, 1), (2.5, 1)]
+
+
+def test_sample_windows_keep_unlabeled_returns_every_window_for_risk_curves():
+    # Evaluation needs the full curve: the gap before the alert and post-event windows come back as None.
+    got = sample_windows(duration=10.0, alert=6.0, event=7.5, fps=8.0, num_frames=16, stride_frames=4, gap=0.5,
+                         keep_unlabeled=True)
+    assert [(w.t_end, w.label) for w in got][6:10] == [(5.0, 0), (5.5, None), (6.0, 1), (6.5, 1)]
+    assert got[-1].t_end == 10.0 and got[-1].label is None

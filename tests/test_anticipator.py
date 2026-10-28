@@ -59,3 +59,15 @@ def test_head_parameter_names_match_badas_checkpoint():
         "classifier.classifier.6.weight", "classifier.classifier.6.bias",
         "classifier.classifier.8.weight", "classifier.classifier.8.bias",
     }
+
+
+def test_probe_head_weights_load_into_full_model():
+    # The frozen probe trains a ProbeHead on cached tokens; its weights must drop into Anticipator unchanged.
+    from ks.models.vjepa_anticipator import ProbeHead
+    probe = ProbeHead(hidden_size=32, num_heads=2, head_hidden=16)
+    model = Anticipator(tiny_backbone(), spatial_pool=2, num_heads=2, head_hidden=16).eval()
+    result = model.load_state_dict(probe.state_dict(), strict=False)
+    assert result.unexpected_keys == []
+    assert all(k.startswith("backbone.") for k in result.missing_keys)
+    tokens = torch.randn(2, 8, 32)
+    assert torch.allclose(probe.eval()(tokens), model.head(tokens))

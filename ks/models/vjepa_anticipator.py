@@ -52,6 +52,19 @@ class MLPHead(nn.Module):
         return self.classifier(x)
 
 
+class ProbeHead(nn.Module):
+    """The Anticipator's head alone, for the frozen probe trained on cached tokens. Same parameter
+    names, so `Anticipator.load_state_dict(probe.state_dict(), strict=False)` installs it."""
+
+    def __init__(self, hidden_size=1024, num_heads=8, head_hidden=768, head_layers=3, num_classes=2, dropout=0.1):
+        super().__init__()
+        self.temporal_processor = TemporalAttentionPooling(hidden_size, num_heads)
+        self.classifier = MLPHead(hidden_size, head_hidden, head_layers, num_classes, dropout)
+
+    def forward(self, tokens):
+        return self.classifier(self.temporal_processor(tokens))
+
+
 class Anticipator(nn.Module):
     """clips (B, T, C, H, W) -> 2 logits (safe, danger).
 

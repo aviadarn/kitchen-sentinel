@@ -38,13 +38,14 @@ def window_label(t_end, alert, event, gap=0.5):
     return None
 
 
-def sample_windows(duration, alert, event, fps=8.0, num_frames=16, stride_frames=8, gap=0.5):
-    """All labeled windows of a video. Windows that would need padding are never produced."""
+def sample_windows(duration, alert, event, fps=8.0, num_frames=16, stride_frames=8, gap=0.5, keep_unlabeled=False):
+    """All labeled windows of a video (with keep_unlabeled, every window, label None where training
+    would drop it). Windows that would need padding are never produced."""
     total_frames = math.floor(duration * fps + 1e-9)
     windows = []
     for end in range(num_frames, total_frames + 1, stride_frames):
         t_end = end / fps
         label = window_label(t_end, alert, event, gap)
-        if label is not None:
+        if label is not None or keep_unlabeled:
             windows.append(Window(start_frame=end - num_frames, end_frame=end, t_end=t_end, label=label))
     return windows
