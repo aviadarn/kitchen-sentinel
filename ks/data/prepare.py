@@ -53,11 +53,15 @@ def normalize_all(jobs, workers):
         src, dst = job
         if dst.exists():
             return None
+        # Write to a temp name and rename on success: a killed run must not leave a half-written
+        # file that the next run would skip as already done.
+        part = dst.with_name(dst.stem + ".part.mp4")
         try:
-            normalize_video(src, dst)
+            normalize_video(src, part)
+            part.rename(dst)
             return None
         except subprocess.CalledProcessError:
-            dst.unlink(missing_ok=True)
+            part.unlink(missing_ok=True)
             return dst
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
