@@ -65,14 +65,17 @@ class KitchenScorer:
 
         self.torch = torch
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = AutoModel.from_pretrained(model_name).to(self.device).eval()
+        self.dtype = torch.float16 if self.device == "cuda" else torch.float32  # fp16: ~4x on tensor cores
+        self.model = AutoModel.from_pretrained(model_name, dtype=self.dtype).to(self.device).eval()
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.prompts = POSITIVE_PROMPTS + NEGATIVE_PROMPTS
 
     def __call__(self, images):
         inputs = self.processor(text=self.prompts, images=images, padding="max_length", return_tensors="pt")
+        inputs = inputs.to(self.device)
+        inputs["pixel_values"] = inputs["pixel_values"].to(self.dtype)
         with self.torch.no_grad():
-            logits = self.model(**inputs.to(self.device)).logits_per_image
+            logits = self.model(**inputs).logits_per_image.float()
         probs = logits.softmax(dim=-1)
         return probs[:, : len(POSITIVE_PROMPTS)].sum(dim=-1).cpu().tolist()
 
