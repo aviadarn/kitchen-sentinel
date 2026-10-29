@@ -12,9 +12,7 @@ import time
 import torch
 from transformers import VJEPA2Model
 
-from ks.models.vjepa_anticipator import Anticipator
-
-BACKBONE = "facebook/vjepa2-vitl-fpc16-256-ssv2"
+from ks.models.vjepa_anticipator import BACKBONE, Anticipator, load_badas
 
 
 def main():
@@ -44,15 +42,8 @@ def main():
           f"logits {tuple(logits.shape)}; one clip {time.time() - t0:.2f}s")
 
     if args.badas:
-        from huggingface_hub import hf_hub_download
-
-        path = hf_hub_download("nexar-ai/BADAS-Open", "weights/badas_open.pth")
-        ckpt = torch.load(path, map_location="cpu", weights_only=False)
-        state = ckpt.get("model_state_dict") or ckpt.get("model") or ckpt.get("state_dict") or ckpt
-        state = {k.removeprefix("model."): v for k, v in state.items()}
-        result = Anticipator(backbone, spatial_pool=1).load_state_dict(state, strict=False)
-        print(f"BADAS checkpoint: {len(state)} tensors; missing {len(result.missing_keys)} "
-              f"{result.missing_keys[:5]}; unexpected {len(result.unexpected_keys)} {result.unexpected_keys[:5]}")
+        load_badas(backbone)
+        print("BADAS checkpoint: loaded, no missing tensors")
 
 
 if __name__ == "__main__":

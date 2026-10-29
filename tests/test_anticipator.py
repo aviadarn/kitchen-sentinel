@@ -71,3 +71,40 @@ def test_probe_head_weights_load_into_full_model():
     assert all(k.startswith("backbone.") for k in result.missing_keys)
     tokens = torch.randn(2, 8, 32)
     assert torch.allclose(probe.eval()(tokens), model.head(tokens))
+
+
+def badas_reference_future(predictor, features, n_future):
+    """BADAS-Open's _predict_future_features (src/train/video_training.py): one sample at a time,
+    zero-padded, context = the present tokens, targets = the next n_future positions."""
+    seq, dim = features.shape[1:]
+    context, target = torch.arange(seq).unsqueeze(0), torch.arange(seq, seq + n_future).unsqueeze(0)
+    out = []
+    for i in range(len(features)):
+        padded = torch.cat([features[i:i + 1], torch.zeros(1, n_future, dim)], dim=1)
+        out.append(predictor(padded, context_mask=[context], target_mask=[target]).last_hidden_state)
+    return torch.cat(out)
+
+
+def test_future_tokens_match_badas_per_sample_predictor_loop():
+    torch.manual_seed(0)
+    model = Anticipator(tiny_backbone(), num_heads=2, head_hidden=16, future_fraction=0.25).eval()
+    features = torch.randn(3, 32, 32)  # 2 time steps x 4 x 4 tokens
+    with torch.no_grad():
+        got = model.predict_future(features)
+        want = badas_reference_future(model.backbone.predictor, features, n_future=8)
+    assert got.shape == (3, 8, 32)
+    torch.testing.assert_close(got, want)
+
+
+def test_badas_mode_classifies_present_and_future_tokens_together():
+    model = Anticipator(tiny_backbone(), num_heads=2, head_hidden=16, future_fraction=0.25).eval()
+    clips = torch.randn(2, 4, 3, 32, 32)
+    with torch.no_grad():
+        tokens = model.encode(clips)
+        want = model.head(torch.cat([tokens, model.predict_future(tokens)], dim=1))
+        torch.testing.assert_close(model(clips), want)
+
+
+def test_future_prediction_needs_the_full_token_grid():
+    with pytest.raises(ValueError):
+        Anticipator(tiny_backbone(), spatial_pool=2, future_fraction=0.25)
