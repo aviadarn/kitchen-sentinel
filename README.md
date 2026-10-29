@@ -85,6 +85,9 @@ often inside warnings than before them, against about 5 times for the single fra
 | Feature cache: V-JEPA2 tokens, BADAS-Open score, SigLIP embedding | GPU box | `python -m ks.features --manifest data/manifest.csv --out features` |
 | Cross-validated probe and baselines | GPU box | `python -m ks.eval.cv --features features --out reports/<run> [--train-without oops]` |
 | Shortcut audit, outcome by hazard, risk curves | Mac | `python -m ks.eval.audit --features features --run reports/<run>` |
+| Example videos: 2 random clips per outcome, risk drawn in as they play, plus an `index.html` gallery | Mac | `python -m ks.demo --features features --run reports/<run> --out demos` |
+
+The example videos contain source footage, so `demos/` stays out of git.
 
 `scripts/box_setup.sh` and `scripts/run_v2.sh` reproduce the GPU part on a rented RTX 4090: about 1 h
 of features and 1 h of CV, roughly $1. BADAS-Open is gated on Hugging Face. Accept its terms, then

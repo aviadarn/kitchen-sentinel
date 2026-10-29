@@ -15,3 +15,4 @@ __pycache__/
 *.pt
 *.safetensors
 /reports/**/scores.csv
+/demos/
