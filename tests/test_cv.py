@@ -71,3 +71,16 @@ def test_run_cv_scores_every_window_once_as_test_and_report_has_every_method(tmp
     assert set(results) == {"prior", "badas", "siglip_lr", "vjepa_lr", "probe"}
     assert results["probe"]["hard_ap"] > 0.9
     assert (tmp_path / "results.md").exists() and (tmp_path / "metrics.json").exists()
+
+
+def test_load_features_caches_mean_tokens(tmp_path):
+    from ks.eval.cv import load_features
+
+    rng = np.random.default_rng(0)
+    tokens = rng.normal(0, 1, (5000, 4, 8)).astype(np.float16)
+    np.save(tmp_path / "vjepa.npy", tokens)
+    np.save(tmp_path / "badas.npy", np.zeros(5000, np.float32))
+    np.save(tmp_path / "siglip.npy", np.zeros((5000, 3), np.float16))
+    feats = load_features(tmp_path, device="cpu")
+    np.testing.assert_allclose(feats["vjepa_mean"], tokens.astype(np.float32).mean(1), rtol=1e-3, atol=1e-3)
+    assert (tmp_path / "vjepa_mean.npy").exists()

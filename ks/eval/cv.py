@@ -193,15 +193,16 @@ def _markdown(results, index):
     return "\n".join(lines) + "\n"
 
 
-def load_features(features_dir):
+def load_features(features_dir, device="cuda"):
     d = Path(features_dir)
     feats = {name: np.load(d / f"{name}.npy", mmap_mode="r") for name in ("vjepa", "badas", "siglip")}
     mean_path = d / "vjepa_mean.npy"
     if not mean_path.exists():
+        # On the GPU: numpy's single-threaded float16 conversion takes ~40 min over the 59 GB of tokens.
         v = feats["vjepa"]
         mean = np.empty((len(v), v.shape[2]), dtype=np.float32)
         for i in range(0, len(v), 2048):
-            mean[i:i + 2048] = np.asarray(v[i:i + 2048], dtype=np.float32).mean(1)
+            mean[i:i + 2048] = torch.from_numpy(np.asarray(v[i:i + 2048])).to(device).float().mean(1).cpu().numpy()
         np.save(mean_path, mean)
     feats["vjepa_mean"] = np.load(mean_path)
     return feats
@@ -220,7 +221,7 @@ def main():
     done = np.load(Path(a.features) / "done.npy")
     index = index[done]
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    scores = run_cv(index, load_features(a.features), folds=a.folds, seeds=a.seeds, device=device,
+    scores = run_cv(index, load_features(a.features, device), folds=a.folds, seeds=a.seeds, device=device,
                     probe_kw=dict(steps=a.steps), log=lambda s: print(s, flush=True))
     Path(a.out).mkdir(parents=True, exist_ok=True)
     scores.to_csv(Path(a.out) / "scores.csv", index=False)
