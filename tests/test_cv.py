@@ -107,3 +107,31 @@ def test_accident_outcomes_list_each_accident_with_its_hazard_and_first_alarm():
     assert (out.loc["p0", "outcome"], out.loc["p0", "first_alarm"]) == ("early", 2.0)
     assert out.loc["p1", "outcome"] == "miss" and np.isnan(out.loc["p1", "first_alarm"])
     assert (out.loc["p2", "outcome"], out.loc["p2", "first_alarm"]) == ("on_time", 3.5)
+
+
+def with_youtube_negatives():
+    """synthetic() plus two same-source negative clips (source oops, label 0) that a source-reading
+    model scores high."""
+    index, feats = synthetic()
+    extra = pd.DataFrame([dict(video_id=f"y{i}", source="oops", path=f"y{i}.mp4", view="mixed", group=f"gy{i}",
+                               fold=i, label=0, events="[]", duration=10.0) for i in range(2)])
+    yt = feature_index(extra)
+    return pd.concat([index, yt], ignore_index=True)
+
+
+def test_false_alarms_are_reported_separately_for_youtube_normal_footage():
+    index = with_youtube_negatives()
+    preds = index.copy()
+    preds["score"] = np.where(preds.window_label == 1, 0.9, 0.1)
+    preds.loc[preds.video_id.str.startswith("y"), "score"] = 0.9  # fires on every same-source window
+    m = summarize(preds, taus=dict.fromkeys(range(5), 0.5))
+    assert m["fa_per_h"] == 0.0  # normal cooking: quiet
+    assert m["fa_per_h_youtube"] == pytest.approx(2 * 5 / (20 / 3600))  # 9 windows, 1 s apart, 2 s refractory
+
+
+def test_train_rows_can_leave_a_negative_stratum_out():
+    index = with_youtube_negatives()
+    index["role"] = "train"
+    rng = np.random.default_rng(0)
+    assert "y0" in set(index.loc[train_rows(index, 100, rng)].video_id)
+    assert "y0" not in set(index.loc[train_rows(index, 100, rng, exclude=("oops",))].video_id)

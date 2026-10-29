@@ -72,3 +72,36 @@ def test_every_fold_gets_positives_and_negatives():
              "group": f"charades:S{i}", "label": "0", "duration": "30.0"} for i in range(10)]
     df = build(candidates=cands, labels=labels, negatives=negs, folds=5)
     assert df.groupby(["fold", "label"]).size().to_dict() == {(f, y): 2 for f in range(5) for y in (0, 1)}
+
+
+def test_unkept_oops_clips_contribute_their_footage_before_the_fail_as_negatives():
+    # Same YouTube source as the positives, so "looks like a fail compilation" stops predicting danger.
+    cands = CANDIDATES + [
+        {"video_id": "Comp A7", "group": "Comp A", "oops_event": "6.0", "candidate": "True"},   # unlabeled
+        {"video_id": "Comp E1", "group": "Comp E", "oops_event": "3.0", "candidate": "True"},   # too short
+        {"video_id": "Comp F1", "group": "Comp F", "oops_event": "", "candidate": "True"},      # no marker
+        {"video_id": "Comp G1", "group": "Comp G", "oops_event": "9.0", "candidate": "False"},  # not a kitchen
+    ]
+    cands[1] = {**cands[1], "oops_event": "5.0", "candidate": "True"}  # Comp A1, rejected
+    cands[0] = {**cands[0], "oops_event": "3.0", "candidate": "True"}  # Comp A0, kept: stays a positive
+    df = build(candidates=cands).set_index("video_id")
+    prefail = df[(df.source == "oops") & (df.label == 0)]
+    assert sorted(prefail.index) == ["Comp A1", "Comp A7"]
+    assert prefail.loc["Comp A7", "duration"] == 4.5  # marker 6.0 - 1.5 s margin
+    assert prefail.loc["Comp A1", "events"] == "[]" and df.loc["Comp A0", "label"] == 1
+    assert df.loc["Comp A7", "fold"] == df.loc["Comp A0", "fold"]  # one compilation, one fold
+    assert validate(df.reset_index()) == []
+
+
+def test_adding_youtube_negatives_leaves_the_positives_folds_unchanged():
+    # Folds balance positives first, so the pilot's folds survive and runs stay comparable.
+    cands = [{"video_id": f"Comp {g}{i}", "group": f"Comp {g}", "oops_event": "8.0", "candidate": "True"}
+             for g in "ABCDEFGHIJ" for i in range(1 + (g in "AB") * 3)]
+    labels = {f"Comp {g}0": {"decision": "keep", "duration": "5.0",
+                             "events": '[{"alert": 3.0, "event": 4.0, "hazard": "cut"}]'} for g in "ABCDEFGHIJ"}
+    with_neg = build(candidates=cands, labels=labels).set_index("video_id")
+    without = build(candidates=[{k: v for k, v in c.items() if k != "candidate"} for c in cands],
+                    labels=labels).set_index("video_id")
+    pos = without[without.label == 1].index
+    assert (with_neg.loc[pos, "fold"] == without.loc[pos, "fold"]).all()
+    assert with_neg[with_neg.label == 1].groupby("fold").size().tolist() == [2] * 5

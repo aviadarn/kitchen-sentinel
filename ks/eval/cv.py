@@ -29,12 +29,15 @@ EARLY_GAP = 0.5  # same margin as the training labels' pre-alert gap
 METHODS = ["prior", "badas", "siglip_lr", "vjepa_lr", "probe"]
 
 
-def train_rows(index, max_per_stratum, rng):
+def train_rows(index, max_per_stratum, rng, exclude=()):
     """Labeled windows of the train folds: every positive and pre-alert window, and at most
-    `max_per_stratum` windows from each normal-cooking source (they are many and redundant)."""
+    `max_per_stratum` windows from each normal-footage source (they are many and redundant); negative
+    strata in `exclude` are left out."""
     rows = []
     train = index[(index.role == "train") & index.window_label.notna()]
     strata = [negative_stratum(s, v) for s, v in zip(train.source, train.video_label)]
+    keep = ~(train.window_label.eq(0).to_numpy() & np.isin(strata, list(exclude)))
+    train, strata = train[keep], list(np.asarray(strata, dtype=object)[keep])
     for stratum, part in train.groupby(train.window_label.astype(int).astype(str) + "/" + pd.Series(strata, train.index)):
         r = part.index.to_numpy()
         if stratum.startswith("0/") and stratum != "0/oops-prealert" and len(r) > max_per_stratum:
@@ -55,7 +58,7 @@ def _lr(x_tr, y_tr, w_tr, x_val, y_val, grid):
 
 
 def run_cv(index, feats, folds=5, seeds=(0, 1, 2), max_per_stratum=3000, device="cuda", probe_kw=None,
-           lr_grid=(0.001, 0.01, 0.1, 1.0), log=print):
+           lr_grid=(0.001, 0.01, 0.1, 1.0), train_exclude=(), log=print):
     """Scores of every method on the val and test windows of every round: columns row, method, seed,
     fold (the round's test fold), role, score."""
     index = index.copy()
@@ -63,7 +66,7 @@ def run_cv(index, feats, folds=5, seeds=(0, 1, 2), max_per_stratum=3000, device=
     out = []
     for k in range(folds):
         index["role"] = index.fold.map(fold_roles(folds, k))
-        tr = train_rows(index, max_per_stratum, np.random.default_rng(k))
+        tr = train_rows(index, max_per_stratum, np.random.default_rng(k), exclude=train_exclude)
         y_tr = index.window_label[tr].astype(int).to_numpy()
         w_tr = balance_weights(y_tr, index.stratum[tr].to_numpy())
         ev = index.index[index.role.isin(["val", "test"])].to_numpy()
@@ -107,11 +110,19 @@ def _attach(index, scores):
     return index.loc[scores.row].assign(score=scores.score.to_numpy(), fold=scores.fold.to_numpy())
 
 
+def youtube_normal(preds):
+    """Same-source negatives: footage of Oops clips before their failure starts."""
+    return (preds.video_label == 0) & (preds.source == "oops")
+
+
 def fold_taus(index, scores):
-    """fold -> tau meeting the false-alarm budget on that round's validation negatives, for one method
-    and seed's `scores`."""
-    return {k: choose_tau(risk_curves(_attach(index, v), positive=False), MAX_FA_PER_HOUR)
-            for k, v in scores[scores.role == "val"].groupby("fold")}
+    """fold -> tau meeting the false-alarm budget on that round's validation normal-cooking videos, for
+    one method and seed's `scores`. YouTube normal footage is scored separately, not used for tau."""
+    taus = {}
+    for k, v in scores[scores.role == "val"].groupby("fold"):
+        preds = _attach(index, v)
+        taus[k] = choose_tau(risk_curves(preds[~youtube_normal(preds)], positive=False), MAX_FA_PER_HOUR)
+    return taus
 
 
 def accident_outcomes(preds, taus):
@@ -141,16 +152,17 @@ def summarize(preds, taus):
         ye, se, _ = easy_set(preds, offset)
         m[f"easy_ap@{offset}"] = float(average_precision_score(ye, se))
     out = accident_outcomes(preds, taus)
-    alarms, hours = 0, 0.0
-    for fold, part in preds.groupby("fold"):
+    alarms, hours = {False: 0, True: 0}, {False: 0.0, True: 0.0}
+    for (fold, youtube), part in preds.groupby([preds.fold, youtube_normal(preds)]):
         for times, probs, duration in risk_curves(part, positive=False):
-            alarms += false_alarms(times, probs, taus[fold])
-            hours += duration / 3600
+            alarms[youtube] += false_alarms(times, probs, taus[fold])
+            hours[youtube] += duration / 3600
     caught = out.outcome != "miss"
     m.update(recall=float(caught.mean()), on_time_recall=float((out.outcome == "on_time").mean()),
              early=float((out.outcome == "early").mean()),
              mtta=float((out.event - out.first_alarm)[caught].mean()) if caught.any() else float("nan"),
-             fa_per_h=alarms / hours, events=len(out))
+             fa_per_h=alarms[False] / hours[False],
+             fa_per_h_youtube=alarms[True] / hours[True] if hours[True] else float("nan"), events=len(out))
     return m
 
 
@@ -192,16 +204,19 @@ def report(scores, index, out_dir, n_boot=1000):
 
 def _markdown(results, index):
     pos = index[index.video_label == 1]
-    neg_hours = index[index.video_label == 0].groupby("video_id").duration.first().sum() / 3600
+    negs = index[index.video_label == 0].groupby("video_id").first()
+    neg_hours = negs[negs.source != "oops"].duration.sum() / 3600
+    yt_min = negs[negs.source == "oops"].duration.sum() / 60
     lines = [
         f"{pos.video_id.nunique()} positive clips, {results[next(iter(results))]['events']:.0f} accidents with a "
-        f"visible lead-up; {neg_hours:.1f} h of normal cooking. Out-of-fold over {index.fold.nunique()} folds; "
-        f"tau per fold for <= {MAX_FA_PER_HOUR:g} false alarm/h on its validation fold. Of the accidents, "
+        f"visible lead-up; {neg_hours:.1f} h of normal cooking; {yt_min:.0f} min of YouTube normal footage (Oops clips "
+        f"before their failure). Out-of-fold over {index.fold.nunique()} folds; "
+        f"tau per fold for <= {MAX_FA_PER_HOUR:g} false alarm/h on its validation fold's normal cooking. Of the accidents, "
         f"'on time' = first alarm no earlier than {EARLY_GAP:g} s before the labeled alert; 'early' = before that "
         f"(the clip looks like a fail video, but no danger is visible yet).", "",
         "| method | hard AP [95% CI] | hard AUC | " + " | ".join(f"easy AP @{o}s" for o in EASY_OFFSETS)
-        + " | recall @tau | on time | early | mTTA (s) | FA/h @tau | ECE |",
-        "|---" * (10 + len(EASY_OFFSETS)) + "|",
+        + " | recall @tau | on time | early | mTTA (s) | FA/h @tau | FA/h YouTube normal | ECE |",
+        "|---" * (11 + len(EASY_OFFSETS)) + "|",
     ]
     for method, r in results.items():
         lo, hi = r["hard_ap_ci"]
@@ -209,7 +224,7 @@ def _markdown(results, index):
                      f"[{lo:.3f}, {hi:.3f}] | {r['hard_auc']:.3f} | "
                      + " | ".join(f"{r[f'easy_ap@{o}']:.3f}" for o in EASY_OFFSETS)
                      + f" | {r['recall']:.2f} | {r['on_time_recall']:.2f} | {r['early']:.2f} | {r['mtta']:.2f} | "
-                       f"{r['fa_per_h']:.2f} | {r['ece']:.3f} |")
+                       f"{r['fa_per_h']:.2f} | {r['fa_per_h_youtube']:.1f} | {r['ece']:.3f} |")
     if "delta_vs_siglip" in results.get("probe", {}):
         lo, hi = results["probe"]["delta_vs_siglip_ci"]
         lines += ["", f"Gate (probe beats single-frame SigLIP on hard AP): delta = "
@@ -239,6 +254,7 @@ def main():
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--steps", type=int, default=2000)
+    ap.add_argument("--train-without", nargs="*", default=[], help="negative strata kept out of training, e.g. oops")
     a = ap.parse_args()
 
     index = pd.read_csv(Path(a.features) / "index.csv")
@@ -246,7 +262,7 @@ def main():
     index = index[done]
     device = "cuda" if torch.cuda.is_available() else "cpu"
     scores = run_cv(index, load_features(a.features, device), folds=a.folds, seeds=a.seeds, device=device,
-                    probe_kw=dict(steps=a.steps), log=lambda s: print(s, flush=True))
+                    probe_kw=dict(steps=a.steps), train_exclude=a.train_without, log=lambda s: print(s, flush=True))
     Path(a.out).mkdir(parents=True, exist_ok=True)
     scores.to_csv(Path(a.out) / "scores.csv", index=False)
     report(scores, index, a.out)

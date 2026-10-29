@@ -19,15 +19,15 @@ from sklearn.metrics import roc_auc_score
 from ks.eval.cv import _attach, accident_outcomes, fold_taus
 from ks.eval.protocol import accident_curves
 
-KINDS = ["pre-alert", "gap", "warning", "after", "charades", "epic"]
+KINDS = ["pre-alert", "gap", "warning", "after", "youtube", "charades", "epic"]
 
 
 def window_kind(preds):
     """warning / pre-alert / gap (just before the alert) / after (an accident) for fail-clip windows;
-    the source name for normal-cooking windows."""
+    youtube for unkept Oops clips before their failure; the source name for normal-cooking windows."""
     def kind(r):
         if r.video_label == 0:
-            return r.source
+            return "youtube" if r.source == "oops" else r.source
         if r.window_label == 1:
             return "warning"
         if r.window_label == 0:
@@ -51,7 +51,8 @@ def fire_rates(preds, taus):
 def pre_alert_auc(preds):
     """AUC of pre-alert windows vs normal-cooking windows: 0.5 if the model can't tell a fail clip
     from cooking until danger is visible, 1.0 if it scores the source."""
-    p = preds[((preds.video_label == 1) & (preds.window_label == 0)) | (preds.video_label == 0)]
+    cooking = (preds.video_label == 0) & (preds.source != "oops")
+    p = preds[((preds.video_label == 1) & (preds.window_label == 0)) | cooking]
     return float(roc_auc_score(p.video_label, p.score))
 
 
