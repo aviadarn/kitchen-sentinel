@@ -6,6 +6,8 @@ LayerNorm, mean pooling and a 3-layer MLP to 2 logits. We mirror the code, with 
 names, so a BADAS-initialised run can load their full checkpoint.
 """
 
+import os
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -117,11 +119,13 @@ class Anticipator(nn.Module):
 def load_badas(backbone):
     """Anticipator holding BADAS-Open's fine-tuned backbone and head (gated: accept the terms at
     https://huggingface.co/nexar-ai/BADAS-Open). Its top-level `predictor.*` tensors are an alias of
-    `backbone.predictor.*` (same module registered twice), so they are left out."""
+    `backbone.predictor.*` (same module registered twice), so they are left out.
+
+    Set BADAS_CKPT to a local copy of weights/badas_open.pth to skip the (authenticated) download."""
     from huggingface_hub import hf_hub_download
 
-    ckpt = torch.load(hf_hub_download("nexar-ai/BADAS-Open", "weights/badas_open.pth"), map_location="cpu",
-                      weights_only=False)
+    path = os.environ.get("BADAS_CKPT") or hf_hub_download("nexar-ai/BADAS-Open", "weights/badas_open.pth")
+    ckpt = torch.load(path, map_location="cpu", weights_only=False)
     state = ckpt.get("model_state_dict") or ckpt.get("model") or ckpt.get("state_dict") or ckpt
     cfg = ckpt["config"] if isinstance(ckpt["config"], dict) else vars(ckpt["config"])
     future = None
