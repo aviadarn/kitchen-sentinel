@@ -3,7 +3,7 @@ import math
 import pandas as pd
 import pytest
 
-from ks.eval.protocol import choose_tau, easy_set, hard_set, risk_curves
+from ks.eval.protocol import accident_curves, choose_tau, easy_set, hard_set, risk_curves
 
 
 def preds():
@@ -81,3 +81,12 @@ def test_risk_curves_split_a_multi_event_clip_at_each_accident():
     # The second accident's warning time is measured only on windows after the first accident.
     curves = risk_curves(two_event_preds(), positive=True)
     assert [(c[0][0], c[0][-1], c[2]) for c in curves] == [(2.0, 4.0, 4.0), (5.0, 8.0, 8.0)]
+
+
+def test_accident_curves_carry_alert_and_hazard_for_each_accident():
+    preds = two_event_preds()
+    preds["events"] = '[{"alert": 3.0, "event": 4.0, "hazard": "cut"}, {"alert": 7.0, "event": 8.0, "hazard": "fire"}]'
+    curves = accident_curves(preds)
+    assert [(c["video_id"], c["alert"], c["event"], c["hazard"]) for c in curves] == [
+        ("m", 3.0, 4.0, "cut"), ("m", 7.0, 8.0, "fire")]
+    assert curves[1]["times"][0] == 5.0

@@ -24,7 +24,10 @@ model = [
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "matplotlib>=3.11.2",
+    "pytest>=8.0",
+]
 
 [build-system]
 requires = ["hatchling"]

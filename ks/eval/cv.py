@@ -107,6 +107,31 @@ def _attach(index, scores):
     return index.loc[scores.row].assign(score=scores.score.to_numpy(), fold=scores.fold.to_numpy())
 
 
+def fold_taus(index, scores):
+    """fold -> tau meeting the false-alarm budget on that round's validation negatives, for one method
+    and seed's `scores`."""
+    return {k: choose_tau(risk_curves(_attach(index, v), positive=False), MAX_FA_PER_HOUR)
+            for k, v in scores[scores.role == "val"].groupby("fold")}
+
+
+def accident_outcomes(preds, taus):
+    """One row per accident a window can see coming: hazard, first alarm time (NaN if none) and outcome
+    on_time / early / miss under its fold's tau. An alarm more than EARLY_GAP before the alert says
+    "this is a fail video", not "it's coming"."""
+    rows = []
+    for fold, part in preds.groupby("fold"):
+        tau = taus[fold]
+        for c in accident_curves(part):
+            if not c["times"]:
+                continue  # accident before the first full window: nothing can see it coming
+            tta = time_to_accident(c["times"], c["probs"], tau, c["event"])
+            first = np.nan if tta is None else c["event"] - tta
+            outcome = "miss" if tta is None else "early" if first < c["alert"] - EARLY_GAP else "on_time"
+            rows.append(dict(video_id=c["video_id"], fold=fold, hazard=c["hazard"], alert=c["alert"],
+                             event=c["event"], first_alarm=first, outcome=outcome))
+    return pd.DataFrame(rows)
+
+
 def summarize(preds, taus):
     """Metrics of one method's out-of-fold test predictions; `taus` maps fold -> its alarm threshold."""
     y, s, _ = hard_set(preds)
@@ -115,23 +140,17 @@ def summarize(preds, taus):
     for offset in EASY_OFFSETS:
         ye, se, _ = easy_set(preds, offset)
         m[f"easy_ap@{offset}"] = float(average_precision_score(ye, se))
-    ttas, events, early, alarms, hours = [], 0, 0, 0, 0.0
+    out = accident_outcomes(preds, taus)
+    alarms, hours = 0, 0.0
     for fold, part in preds.groupby("fold"):
-        tau = taus[fold]
-        for times, probs, alert, event in accident_curves(part):
-            if not times:
-                continue  # accident before the first full window: nothing can see it coming
-            events += 1
-            tta = time_to_accident(times, probs, tau, event)
-            if tta is not None:
-                ttas.append(tta)
-                # An alarm before the danger is visible says "this is a fail video", not "it's coming".
-                early += event - tta < alert - EARLY_GAP
         for times, probs, duration in risk_curves(part, positive=False):
-            alarms += false_alarms(times, probs, tau)
+            alarms += false_alarms(times, probs, taus[fold])
             hours += duration / 3600
-    m.update(recall=len(ttas) / events, on_time_recall=(len(ttas) - early) / events, early=early / events,
-             mtta=float(np.mean(ttas)) if ttas else float("nan"), fa_per_h=alarms / hours, events=events)
+    caught = out.outcome != "miss"
+    m.update(recall=float(caught.mean()), on_time_recall=float((out.outcome == "on_time").mean()),
+             early=float((out.outcome == "early").mean()),
+             mtta=float((out.event - out.first_alarm)[caught].mean()) if caught.any() else float("nan"),
+             fa_per_h=alarms / hours, events=len(out))
     return m
 
 
@@ -143,8 +162,7 @@ def report(scores, index, out_dir, n_boot=1000):
     for method in [m for m in METHODS if m in set(scores.method)]:
         per_seed, hard_rows = [], []
         for seed, s in scores[scores.method == method].groupby("seed"):
-            taus = {k: choose_tau(risk_curves(_attach(index, v), positive=False), MAX_FA_PER_HOUR)
-                    for k, v in s[s.role == "val"].groupby("fold")}
+            taus = fold_taus(index, s)
             preds = _attach(index, s[s.role == "test"])
             per_seed.append(summarize(preds, taus) | {"taus": taus})
             hard_rows.append(hard_set(preds))

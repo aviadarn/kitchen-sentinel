@@ -94,3 +94,16 @@ def test_summarize_separates_alarms_before_the_alert_from_on_time_ones():
     assert m["recall"] == 1.0
     assert m["early"] == 1.0 and m["on_time_recall"] == 0.0
     assert summarize(perfect_preds(), taus=dict.fromkeys(range(5), 0.5))["on_time_recall"] == 1.0
+
+
+def test_accident_outcomes_list_each_accident_with_its_hazard_and_first_alarm():
+    from ks.eval.cv import accident_outcomes
+
+    preds = perfect_preds()
+    preds.loc[preds.video_id == "p0", "score"] = 0.9  # fires from its first window: early
+    preds.loc[preds.video_id == "p1", "score"] = 0.1  # never fires: miss
+    out = accident_outcomes(preds, dict.fromkeys(range(5), 0.5)).set_index("video_id")
+    assert len(out) == 10 and set(out.hazard) == {"cut"}
+    assert (out.loc["p0", "outcome"], out.loc["p0", "first_alarm"]) == ("early", 2.0)
+    assert out.loc["p1", "outcome"] == "miss" and np.isnan(out.loc["p1", "first_alarm"])
+    assert (out.loc["p2", "outcome"], out.loc["p2", "first_alarm"]) == ("on_time", 3.5)

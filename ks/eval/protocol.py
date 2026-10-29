@@ -42,19 +42,21 @@ def easy_set(preds, offset, tolerance=0.13):
 
 
 def accident_curves(preds):
-    """One (times, probs, alert, event) per accident of the positive videos, over the windows after the
-    previous accident up to this one."""
+    """One dict (video_id, times, probs, alert, event, hazard) per accident of the positive videos, over
+    the windows after the previous accident up to this one."""
     curves = []
-    for _, v in preds[preds.video_label == 1].groupby("video_id", sort=True):
+    for video_id, v in preds[preds.video_label == 1].groupby("video_id", sort=True):
         v = v.sort_values("t_end")
         events = v.events.iloc[0]
         events = json.loads(events) if isinstance(events, str) else events
-        pairs = sorted((e["alert"], e["event"]) if isinstance(e, dict) else tuple(e) for e in events)
+        events = sorted(({"alert": e[0], "event": e[1]} if not isinstance(e, dict) else e for e in events),
+                        key=lambda e: e["event"])
         previous = -np.inf
-        for alert, event in pairs:
-            seg = v[(v.t_end > previous) & (v.t_end <= event)]
-            curves.append((seg.t_end.tolist(), seg.score.tolist(), float(alert), float(event)))
-            previous = event
+        for e in events:
+            seg = v[(v.t_end > previous) & (v.t_end <= e["event"])]
+            curves.append(dict(video_id=video_id, times=seg.t_end.tolist(), probs=seg.score.tolist(),
+                               alert=float(e["alert"]), event=float(e["event"]), hazard=e.get("hazard")))
+            previous = e["event"]
     return curves
 
 
@@ -62,7 +64,7 @@ def risk_curves(preds, positive):
     """Positive videos -> one (times, probs, event) per accident (see accident_curves); negatives ->
     (times, probs, duration)."""
     if positive:
-        return [(times, probs, event) for times, probs, _, event in accident_curves(preds)]
+        return [(c["times"], c["probs"], c["event"]) for c in accident_curves(preds)]
     return [(v.t_end.tolist(), v.score.tolist(), float(v.duration.iloc[0]))
             for _, v in preds[preds.video_label == 0].sort_values("t_end").groupby("video_id", sort=True)]
 
