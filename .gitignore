@@ -6,7 +6,7 @@ __pycache__/
 
 # Video, features and checkpoints never go in git (see README "Data rights").
 /data/
-/features/
+/features*/
 /checkpoints/
 /runs/
 *.mp4
