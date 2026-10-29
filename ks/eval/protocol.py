@@ -41,21 +41,30 @@ def easy_set(preds, offset, tolerance=0.13):
             np.concatenate([pos_g, neg.group.to_numpy()]))
 
 
-def risk_curves(preds, positive):
-    """Positive videos -> one (times, probs, event) per accident, over the windows after the previous
-    accident up to this one; negatives -> (times, probs, duration)."""
+def accident_curves(preds):
+    """One (times, probs, alert, event) per accident of the positive videos, over the windows after the
+    previous accident up to this one."""
     curves = []
-    for _, v in preds[preds.video_label == (1 if positive else 0)].groupby("video_id", sort=True):
+    for _, v in preds[preds.video_label == 1].groupby("video_id", sort=True):
         v = v.sort_values("t_end")
-        if not positive:
-            curves.append((v.t_end.tolist(), v.score.tolist(), float(v.duration.iloc[0])))
-            continue
+        events = v.events.iloc[0]
+        events = json.loads(events) if isinstance(events, str) else events
+        pairs = sorted((e["alert"], e["event"]) if isinstance(e, dict) else tuple(e) for e in events)
         previous = -np.inf
-        for event in event_times(v.events.iloc[0]):
+        for alert, event in pairs:
             seg = v[(v.t_end > previous) & (v.t_end <= event)]
-            curves.append((seg.t_end.tolist(), seg.score.tolist(), float(event)))
+            curves.append((seg.t_end.tolist(), seg.score.tolist(), float(alert), float(event)))
             previous = event
     return curves
+
+
+def risk_curves(preds, positive):
+    """Positive videos -> one (times, probs, event) per accident (see accident_curves); negatives ->
+    (times, probs, duration)."""
+    if positive:
+        return [(times, probs, event) for times, probs, _, event in accident_curves(preds)]
+    return [(v.t_end.tolist(), v.score.tolist(), float(v.duration.iloc[0]))
+            for _, v in preds[preds.video_label == 0].sort_values("t_end").groupby("video_id", sort=True)]
 
 
 def choose_tau(negative_curves, max_fa_per_hour, refractory=2.0):

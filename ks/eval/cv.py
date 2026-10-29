@@ -20,11 +20,12 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from ks.eval.metrics import expected_calibration_error, false_alarms, group_bootstrap_ci, time_to_accident
-from ks.eval.protocol import choose_tau, easy_set, hard_set, risk_curves
+from ks.eval.protocol import accident_curves, choose_tau, easy_set, hard_set, risk_curves
 from ks.train import balance_weights, fold_roles, negative_stratum, score, train_probe
 
 EASY_OFFSETS = (0.25, 0.5, 1.0)  # labeled warnings are short (median 0.43 s), so BADAS's 0.5/1.0/1.5 shift down
 MAX_FA_PER_HOUR = 1.0
+EARLY_GAP = 0.5  # same margin as the training labels' pre-alert gap
 METHODS = ["prior", "badas", "siglip_lr", "vjepa_lr", "probe"]
 
 
@@ -114,21 +115,23 @@ def summarize(preds, taus):
     for offset in EASY_OFFSETS:
         ye, se, _ = easy_set(preds, offset)
         m[f"easy_ap@{offset}"] = float(average_precision_score(ye, se))
-    ttas, events, alarms, hours = [], 0, 0, 0.0
+    ttas, events, early, alarms, hours = [], 0, 0, 0, 0.0
     for fold, part in preds.groupby("fold"):
         tau = taus[fold]
-        for times, probs, event in risk_curves(part, positive=True):
+        for times, probs, alert, event in accident_curves(part):
             if not times:
                 continue  # accident before the first full window: nothing can see it coming
             events += 1
             tta = time_to_accident(times, probs, tau, event)
             if tta is not None:
                 ttas.append(tta)
+                # An alarm before the danger is visible says "this is a fail video", not "it's coming".
+                early += event - tta < alert - EARLY_GAP
         for times, probs, duration in risk_curves(part, positive=False):
             alarms += false_alarms(times, probs, tau)
             hours += duration / 3600
-    m.update(recall=len(ttas) / events, mtta=float(np.mean(ttas)) if ttas else float("nan"),
-             fa_per_h=alarms / hours, events=events)
+    m.update(recall=len(ttas) / events, on_time_recall=(len(ttas) - early) / events, early=early / events,
+             mtta=float(np.mean(ttas)) if ttas else float("nan"), fa_per_h=alarms / hours, events=events)
     return m
 
 
@@ -175,17 +178,20 @@ def _markdown(results, index):
     lines = [
         f"{pos.video_id.nunique()} positive clips, {results[next(iter(results))]['events']:.0f} accidents with a "
         f"visible lead-up; {neg_hours:.1f} h of normal cooking. Out-of-fold over {index.fold.nunique()} folds; "
-        f"tau per fold for <= {MAX_FA_PER_HOUR:g} false alarm/h on its validation fold.", "",
+        f"tau per fold for <= {MAX_FA_PER_HOUR:g} false alarm/h on its validation fold. Of the accidents, "
+        f"'on time' = first alarm no earlier than {EARLY_GAP:g} s before the labeled alert; 'early' = before that "
+        f"(the clip looks like a fail video, but no danger is visible yet).", "",
         "| method | hard AP [95% CI] | hard AUC | " + " | ".join(f"easy AP @{o}s" for o in EASY_OFFSETS)
-        + " | recall @tau | mTTA (s) | FA/h @tau | ECE |",
-        "|---" * (8 + len(EASY_OFFSETS)) + "|",
+        + " | recall @tau | on time | early | mTTA (s) | FA/h @tau | ECE |",
+        "|---" * (10 + len(EASY_OFFSETS)) + "|",
     ]
     for method, r in results.items():
         lo, hi = r["hard_ap_ci"]
         lines.append(f"| {method}{' (%d seeds)' % r['seeds'] if r['seeds'] > 1 else ''} | {r['hard_ap']:.3f} "
                      f"[{lo:.3f}, {hi:.3f}] | {r['hard_auc']:.3f} | "
                      + " | ".join(f"{r[f'easy_ap@{o}']:.3f}" for o in EASY_OFFSETS)
-                     + f" | {r['recall']:.2f} | {r['mtta']:.2f} | {r['fa_per_h']:.2f} | {r['ece']:.3f} |")
+                     + f" | {r['recall']:.2f} | {r['on_time_recall']:.2f} | {r['early']:.2f} | {r['mtta']:.2f} | "
+                       f"{r['fa_per_h']:.2f} | {r['ece']:.3f} |")
     if "delta_vs_siglip" in results.get("probe", {}):
         lo, hi = results["probe"]["delta_vs_siglip_ci"]
         lines += ["", f"Gate (probe beats single-frame SigLIP on hard AP): delta = "

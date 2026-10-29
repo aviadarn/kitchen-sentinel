@@ -84,3 +84,13 @@ def test_load_features_caches_mean_tokens(tmp_path):
     feats = load_features(tmp_path, device="cpu")
     np.testing.assert_allclose(feats["vjepa_mean"], tokens.astype(np.float32).mean(1), rtol=1e-3, atol=1e-3)
     assert (tmp_path / "vjepa_mean.npy").exists()
+
+
+def test_summarize_separates_alarms_before_the_alert_from_on_time_ones():
+    # Firing from the very first window (2.0 s) is 1.5 s before alert - 0.5 s: an early fire, not anticipation.
+    preds = perfect_preds()
+    preds.loc[preds.video_label == 1, "score"] = 0.9
+    m = summarize(preds, taus=dict.fromkeys(range(5), 0.5))
+    assert m["recall"] == 1.0
+    assert m["early"] == 1.0 and m["on_time_recall"] == 0.0
+    assert summarize(perfect_preds(), taus=dict.fromkeys(range(5), 0.5))["on_time_recall"] == 1.0
