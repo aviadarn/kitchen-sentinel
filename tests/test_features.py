@@ -101,3 +101,10 @@ def test_extract_refuses_a_changed_index(tmp_path):
     extract(feature_index(manifest()), fake_encode, SPECS, tmp_path, decode=fake_decode)
     with pytest.raises(ValueError, match="index"):
         extract(feature_index(manifest(), neg_stride=4), fake_encode, SPECS, tmp_path, decode=fake_decode)
+
+
+def test_decode_of_a_missing_file_yields_no_frames(tmp_path):
+    # Lets extraction start while videos are still uploading: missing files stay undone for a later pass.
+    from ks.features import decode_frames
+
+    assert len(decode_frames(tmp_path / "not_yet.mp4", 0, 16)) == 0

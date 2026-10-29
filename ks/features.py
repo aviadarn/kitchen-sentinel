@@ -49,9 +49,12 @@ def chunk_plan(index, max_windows=64):
 
 
 def decode_frames(path, start, stop):
-    """RGB frames [start, stop) of a normalized video as uint8 (F, H, W, 3); fewer if the video ends."""
+    """RGB frames [start, stop) of a normalized video as uint8 (F, H, W, 3); fewer if the video ends,
+    none if the file isn't there (yet: extraction can run while videos upload, then resume)."""
     import av
 
+    if not Path(path).exists():
+        return np.zeros((0, 1, 1, 3), np.uint8)
     frames = []
     with av.open(str(path)) as container:
         for i, frame in enumerate(container.decode(video=0)):
