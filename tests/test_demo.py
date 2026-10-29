@@ -44,3 +44,20 @@ def test_render_writes_one_output_frame_per_input_frame(tmp_path):
     out = render(example, curve, tau=0.5, accidents=[(2.5, 3.0)], out_path=tmp_path / "out.mp4")
     with av.open(str(out)) as c:
         assert sum(1 for _ in c.decode(video=0)) == 32
+
+
+def test_wide_layout_is_16_by_9_and_holds_the_last_frame(tmp_path):
+    # The site's card frame is 16:9 and cropped to fill, so the loop is drawn at that shape; the hold
+    # keeps the outcome on screen for a moment before the loop restarts.
+    clip = tmp_path / "clip.mp4"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=8:duration=4",
+                    "-pix_fmt", "yuv420p", str(clip)], check=True)
+    example = pd.Series(dict(kind="on_time", video_id="clip", path=str(clip), start=0.0, stop=4.0, fold=0,
+                             title="test clip", alarm=np.nan))
+    curve = pd.DataFrame(dict(t_end=[2.0, 3.0, 4.0], score=[0.1, 0.9, 0.95]))
+    out = render(example, curve, tau=0.5, accidents=[(2.5, 3.0)], out_path=tmp_path / "wide.mp4", layout="wide",
+                 hold=1.0)
+    with av.open(str(out)) as c:
+        stream = c.streams.video[0]
+        assert (stream.width, stream.height) == (960, 540)
+        assert sum(1 for _ in c.decode(video=0)) == 32 + 8

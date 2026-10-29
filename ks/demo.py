@@ -42,7 +42,7 @@ def pick_examples(preds, taus, per_kind=2, seed=0, pad=6.0):
             vid, extra = candidates[i]
             picked.add(vid)
             v = videos.loc[vid]
-            hazards = sorted({e.get("hazard") for e in json.loads(v.events)} - {None})
+            hazards = sorted({e.get("hazard").replace("_", " / ") for e in json.loads(v.events) if e.get("hazard")})
             title = " · ".join([*hazards, vid])
             rows.append(dict(kind=kind, video_id=vid, path=v.path, fold=v.fold, title=title, **make(v, extra)))
 
@@ -65,9 +65,20 @@ INK = {"surface": "#fcfcfb", "primary": "#0b0b0b", "secondary": "#52514e", "mute
        "grid": "#e1e0d9", "axis": "#c3c2b7", "series": "#2a78d6", "critical": "#d03b3b"}
 
 
-def render(example, curve, tau, accidents, out_path, subtitle=""):
-    """Write an mp4 at the clip's own 8 fps: the frames on top, P(danger) so far below, with the alarm
-    threshold, the labeled warning spans (alert to accident) and an ALARM badge while P >= tau."""
+# Figure size (inches at 100 dpi) and axes boxes: "tall" puts the plot under the clip (gallery), "wide" beside
+# it at 16:9 (the site card frame, which is cropped to fill).
+LAYOUTS = {
+    "tall": dict(size=(6.4, 6.0), kind=(0.04, 0.965), title=(0.04, 0.935), image=(0.04, 0.33, 0.92, 0.585),
+                 plot=(0.11, 0.08, 0.85, 0.2), note=(0.04, 0.012)),
+    "wide": dict(size=(9.6, 5.4), kind=(0.03, 0.935), title=(0.03, 0.895), image=(0.03, 0.06, 0.44, 0.78),
+                 plot=(0.56, 0.2, 0.41, 0.6), note=(0.53, 0.04)),
+}
+
+
+def render(example, curve, tau, accidents, out_path, subtitle="", layout="tall", hold=0.0):
+    """Write an mp4 at the clip's own 8 fps: the frames beside or above P(danger) so far, with the alarm
+    threshold, the labeled warning spans (alert to accident) and an ALARM badge while P >= tau; the
+    last frame repeats for `hold` seconds."""
     import matplotlib
 
     matplotlib.use("Agg")
@@ -79,16 +90,17 @@ def render(example, curve, tau, accidents, out_path, subtitle=""):
     plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
                          "font.size": 8, "axes.edgecolor": INK["axis"], "axes.linewidth": 0.8,
                          "xtick.color": INK["muted"], "ytick.color": INK["muted"]})
-    fig = plt.figure(figsize=(6.4, 6.0), dpi=100, facecolor=INK["surface"])
-    fig.text(0.04, 0.965, KINDS.get(example.kind, example.kind), fontsize=11, weight="bold", color=INK["primary"])
-    fig.text(0.04, 0.935, example.title[-80:], fontsize=7.5, color=INK["secondary"])
-    ax_img = fig.add_axes((0.04, 0.33, 0.92, 0.585))
+    box = LAYOUTS[layout]
+    fig = plt.figure(figsize=box["size"], dpi=100, facecolor=INK["surface"])
+    fig.text(*box["kind"], KINDS.get(example.kind, example.kind), fontsize=11, weight="bold", color=INK["primary"])
+    fig.text(*box["title"], example.title[-80:], fontsize=7.5, color=INK["secondary"])
+    ax_img = fig.add_axes(box["image"])
     ax_img.set_axis_off()
     image = ax_img.imshow(frames[0], interpolation="bilinear")
     badge = ax_img.text(0.03, 0.95, "⚠ ALARM", transform=ax_img.transAxes, va="top", fontsize=12, weight="bold",
                         color="white", family="DejaVu Sans",
                         bbox=dict(boxstyle="round,pad=0.35", fc=INK["critical"], ec="none"))
-    ax = fig.add_axes((0.11, 0.08, 0.85, 0.2), facecolor=INK["surface"])
+    ax = fig.add_axes(box["plot"], facecolor=INK["surface"])
     for spine in ("top", "right"):
         ax.spines[spine].set_visible(False)
     ax.grid(axis="y", color=INK["grid"], linewidth=0.6)
@@ -109,12 +121,12 @@ def render(example, curve, tau, accidents, out_path, subtitle=""):
     ax.text(example.start, tau, " alarm threshold", fontsize=6.5, va="bottom", ha="left", color=INK["secondary"])
     line, = ax.plot([], [], color=INK["series"], linewidth=2, solid_capstyle="round", solid_joinstyle="round")
     cursor = ax.axvline(example.start, color=INK["grid"], linewidth=1.6)
-    fig.text(0.04, 0.012, subtitle, fontsize=6.5, color=INK["muted"])
+    fig.text(*box["note"], subtitle, fontsize=6.5, color=INK["muted"])
 
     w, h = fig.canvas.get_width_height()
     ffmpeg = subprocess.Popen(["ffmpeg", "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgba",
                                "-s", f"{w}x{h}", "-r", str(FPS), "-i", "-", "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                               "-crf", "23", str(out_path)], stdin=subprocess.PIPE)
+                               "-crf", "23", "-movflags", "+faststart", str(out_path)], stdin=subprocess.PIPE)
     for i, frame in enumerate(frames):
         now = (first + i + 1) / FPS  # end of this frame: the newest window ending by now has been scored
         past = curve[curve.t_end <= now + 1e-9]
@@ -123,6 +135,8 @@ def render(example, curve, tau, accidents, out_path, subtitle=""):
         cursor.set_xdata([now, now])
         badge.set_visible(bool(len(past)) and past.score.iloc[-1] >= tau)
         fig.canvas.draw()
+        ffmpeg.stdin.write(np.asarray(fig.canvas.buffer_rgba()).tobytes())
+    for _ in range(int(round(hold * FPS))):
         ffmpeg.stdin.write(np.asarray(fig.canvas.buffer_rgba()).tobytes())
     ffmpeg.stdin.close()
     if ffmpeg.wait():
