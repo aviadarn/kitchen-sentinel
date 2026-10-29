@@ -8,7 +8,7 @@ import json
 
 import pandas as pd
 
-COLUMNS = ["video_id", "source", "path", "view", "group", "split", "label", "events", "duration"]
+COLUMNS = ["video_id", "source", "path", "view", "group", "fold", "label", "events", "duration"]
 HAZARD_TYPES = {"cut", "burn_scald", "fire", "falling_breaking", "slip_fall", "appliance", "impact", "other"}
 
 
@@ -59,7 +59,7 @@ def validate(df):
         else:
             errors.append(f"{r.video_id}: label must be 0 or 1, got {r.label!r}")
 
-    splits_per_group = df.groupby("group")["split"].nunique()
-    for g in splits_per_group[splits_per_group > 1].index:
-        errors.append(f"group {g!r} appears in several splits (leak)")
+    folds_per_group = df.groupby("group")["fold"].nunique()
+    for g in folds_per_group[folds_per_group > 1].index:
+        errors.append(f"group {g!r} appears in several folds (leak)")
     return errors

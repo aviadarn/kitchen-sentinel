@@ -1,4 +1,5 @@
-"""Phase 2 build: labels + candidates + negatives -> one validated, group-split manifest.csv.
+"""Phase 2 build: labels + candidates + negatives -> one validated manifest.csv, group-split into
+cross-validation folds.
 
     uv run python -m ks.data.build --candidates data/candidates.csv --labels data/labels.csv \
         --negatives data/norm/epic/negatives.csv data/norm/charades/negatives.csv \
@@ -15,10 +16,10 @@ import pandas as pd
 from ks.data.manifest import COLUMNS, parse_events, validate
 from ks.data.splits import assign_splits
 
-FRACTIONS = {"train": 0.70, "val": 0.15, "test": 0.15}
+FOLDS = 5
 
 
-def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed):
+def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed, folds=FOLDS):
     """`labels` maps video_id -> latest main-pass label row (see ks.label.server.latest_labels)."""
     rows = []
     for c in candidates:
@@ -35,12 +36,14 @@ def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed):
                      "events": "[]", "duration": float(n["duration"])})
 
     df = pd.DataFrame(rows)
-    # Split each source separately so every split gets its share of positives, ego and third-person
-    # negatives; groups (compilation / participant / actor) never straddle splits.
-    split_of = {}
+    # Too few positives for a fixed test split, so every clip is tested once by k-fold cross-validation.
+    # Fold each source separately so every fold gets its share of positives, ego and third-person
+    # negatives; groups (compilation / participant / actor) never straddle folds.
+    fold_of = {}
     for _, part in df.groupby("source"):
-        split_of.update(assign_splits(part.groupby("group").size().to_dict(), FRACTIONS, seed))
-    df["split"] = df.group.map(split_of)
+        fold_of.update(assign_splits(part.groupby("group").size().to_dict(), dict.fromkeys(range(folds), 1 / folds),
+                                     seed))
+    df["fold"] = df.group.map(fold_of)
     return df[COLUMNS]
 
 
@@ -73,9 +76,9 @@ def main():
         raise SystemExit("manifest invalid:\n" + "\n".join(errors[:20]))
     df.to_csv(a.out, index=False)
     Path(a.out).with_suffix(".summary.txt").write_text(
-        pd.crosstab([df.source, df.label], df.split).to_string() + "\n\n"
+        pd.crosstab([df.source, df.label], df.fold).to_string() + "\n\n"
         + hazard_counts(df).to_string() + "\n")
-    print(pd.crosstab([df.source, df.label], df.split))
+    print(pd.crosstab([df.source, df.label], df.fold))
     print(hazard_counts(df))
 
 

@@ -10,7 +10,7 @@ def ev(alert=6.0, event=7.5, hazard="burn_scald"):
 
 
 def row(events=None, **over):
-    base = dict(video_id="v1", source="oops", path="data/v1.mp4", view="mixed", group="comp A", split="train",
+    base = dict(video_id="v1", source="oops", path="data/v1.mp4", view="mixed", group="comp A", fold=0,
                 label=1, events=json.dumps([ev()] if events is None else events), duration=10.0)
     base.update(over)
     return base
@@ -60,8 +60,8 @@ def test_negative_with_events_is_an_error():
     assert len(validate(pd.DataFrame([negative(events=[ev(2.0, 3.0)])]))) == 1
 
 
-def test_group_in_two_splits_is_a_leak():
-    df = pd.DataFrame([row(), row(video_id="v2", split="test")])
+def test_group_in_two_folds_is_a_leak():
+    df = pd.DataFrame([row(), row(video_id="v2", fold=3)])
     errs = validate(df)
     assert len(errs) == 1 and "comp A" in errs[0]
 
@@ -71,5 +71,5 @@ def test_duplicate_video_id_is_an_error():
 
 
 def test_missing_column_is_reported_without_crashing():
-    errs = validate(pd.DataFrame([row()]).drop(columns=["split"]))
-    assert errs == ["missing column: split"]
+    errs = validate(pd.DataFrame([row()]).drop(columns=["fold"]))
+    assert errs == ["missing column: fold"]

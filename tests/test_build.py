@@ -58,5 +58,17 @@ def test_excluded_clips_are_dropped():
 
 def test_result_is_a_valid_leak_free_manifest():
     df = build()
-    assert set(df.split) <= {"train", "val", "test"}
+    assert set(df.fold) <= set(range(5))
     assert validate(df) == []
+
+
+def test_every_fold_gets_positives_and_negatives():
+    # 10 one-clip compilations and 10 actors over 5 folds: each fold holds 2 of each, so every test
+    # fold of the cross-validation has both classes.
+    cands = [{"video_id": f"Comp {g}0", "group": f"Comp {g}"} for g in "ABCDEFGHIJ"]
+    labels = {c["video_id"]: {"decision": "keep", "duration": "5.0",
+                              "events": '[{"alert": 3.0, "event": 4.0, "hazard": "cut"}]'} for c in cands}
+    negs = [{"video_id": f"charades:{i}", "source": "charades", "path": f"n/{i}.mp4", "view": "third",
+             "group": f"charades:S{i}", "label": "0", "duration": "30.0"} for i in range(10)]
+    df = build(candidates=cands, labels=labels, negatives=negs, folds=5)
+    assert df.groupby(["fold", "label"]).size().to_dict() == {(f, y): 2 for f in range(5) for y in (0, 1)}
