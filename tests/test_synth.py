@@ -37,3 +37,17 @@ def test_gallery_shows_each_start_frame_beside_both_continuations(tmp_path):
     html = page.read_text()
     for name in ("p01_source.jpg", "p01_safe.mp4", "p01_accident.mp4", "the pan bursts into flames"):
         assert name in html
+
+
+def test_held_out_auc_is_high_for_separable_features_and_near_chance_for_noise():
+    import numpy as np
+
+    from ks.synth.detect import held_out_auc
+
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(10), 8)
+    y = np.tile([0, 1], 40)
+    separable = rng.normal(0, 1, (80, 5)) + y[:, None] * 3.0
+    noise = rng.normal(0, 1, (80, 5))
+    assert held_out_auc(separable, y, groups) > 0.95
+    assert 0.3 < held_out_auc(noise, y, groups) < 0.7
