@@ -26,3 +26,14 @@ def test_jobs_need_both_prompts_and_a_known_hazard(tmp_path):
                        accident="x", safe="y")]).to_csv(path, index=False)
     with pytest.raises(ValueError, match="hazard"):
         load_jobs(path)
+
+
+def test_gallery_shows_each_start_frame_beside_both_continuations(tmp_path):
+    from ks.synth.wan_pairs import write_gallery
+
+    jobs = pd.DataFrame([dict(pair="p01", video_id="charades:AB12C", t=3.0, hazard="fire",
+                              accident="the pan bursts into flames", safe="he keeps stirring")])
+    page = write_gallery(jobs, tmp_path)
+    html = page.read_text()
+    for name in ("p01_source.jpg", "p01_safe.mp4", "p01_accident.mp4", "the pan bursts into flames"):
+        assert name in html

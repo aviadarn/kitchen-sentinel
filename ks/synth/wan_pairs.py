@@ -12,6 +12,7 @@ clips are for training only; evaluation stays on real footage.
 
 import argparse
 import csv
+import html
 import math
 import time
 from pathlib import Path
@@ -61,6 +62,28 @@ def source_frame(path, t):
             if frame.time is not None and frame.time >= t:
                 return frame.to_image()
     raise ValueError(f"{path} has no frame at {t:.2f} s")
+
+
+def write_gallery(jobs, out):
+    """index.html in `out`: per pair, the real start frame beside the safe and accident continuations."""
+    rows = []
+    for job in jobs.itertuples(index=False):
+        cells = [f"<figure><img src='{job.pair}_source.jpg'><figcaption>real start frame "
+                 f"({html.escape(job.video_id)}, {job.t:.1f} s)</figcaption></figure>"]
+        for kind in ("safe", "accident"):
+            cells.append(f"<figure><video src='{job.pair}_{kind}.mp4' controls loop muted playsinline></video>"
+                         f"<figcaption><b>{kind}</b>: {html.escape(getattr(job, kind))}</figcaption></figure>")
+        rows.append(f"<h2>{job.pair} · {html.escape(job.hazard.replace('_', ' / '))}</h2><div class=row>"
+                    + "".join(cells) + "</div>")
+    page = Path(out) / "index.html"
+    page.write_text("<!doctype html><meta charset=utf-8><title>synthetic pairs</title>"
+                    "<style>body{font-family:system-ui,sans-serif;background:#fcfcfb;color:#0b0b0b;margin:24px}"
+                    ".row{display:flex;gap:12px;flex-wrap:wrap}figure{margin:0;width:400px}img,video{width:100%}"
+                    "figcaption{font-size:12px;color:#52514e}h2{font-size:15px;margin-top:28px}</style>"
+                    "<h1>Synthetic matched pairs (Wan 2.2 TI2V-5B)</h1><p>Each row starts from one real Charades "
+                    "frame. Judge: does the accident look physically believable, and does the safe twin stay "
+                    "ordinary?</p>" + "".join(rows))
+    return page
 
 
 def main():
@@ -119,6 +142,7 @@ def main():
                 writer.writerow([job.pair, kind, width, height, a.frames, a.steps, f"{seconds:.0f}"])
                 f.flush()
                 print(f"{job.pair} {kind}: {seconds:.0f} s", flush=True)
+    write_gallery(jobs, out)
 
 
 if __name__ == "__main__":
