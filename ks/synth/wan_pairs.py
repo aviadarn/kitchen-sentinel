@@ -85,7 +85,11 @@ def main():
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     vae = AutoencoderKLWan.from_pretrained(a.model, subfolder="vae", torch_dtype=torch.float32)
-    pipe = WanImageToVideoPipeline.from_pretrained(a.model, vae=vae, torch_dtype=torch.bfloat16).to("cuda")
+    pipe = WanImageToVideoPipeline.from_pretrained(a.model, vae=vae, torch_dtype=torch.bfloat16)
+    if torch.cuda.get_device_properties(0).total_memory < 40e9:
+        pipe.enable_model_cpu_offload()  # the 5B transformer and the T5 text encoder do not both fit in 24-32 GB
+    else:
+        pipe.to("cuda")
     pipe.vae.enable_tiling()  # the full-frame decode is what runs out of memory on a 24 GB card
     print(f"expand_timesteps={pipe.config.expand_timesteps}", flush=True)
 
@@ -109,7 +113,7 @@ def main():
                               height=height, width=width, num_frames=a.frames, guidance_scale=a.guidance,
                               num_inference_steps=a.steps,
                               # Same seed for both twins: they share the start until the prompts diverge.
-                              generator=torch.Generator("cuda").manual_seed(n)).frames[0]
+                              generator=torch.Generator("cpu").manual_seed(n)).frames[0]
                 export_to_video(frames, str(path), fps=24)
                 seconds = time.time() - t0
                 writer.writerow([job.pair, kind, width, height, a.frames, a.steps, f"{seconds:.0f}"])
