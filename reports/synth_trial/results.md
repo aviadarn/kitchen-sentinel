@@ -43,6 +43,12 @@ rests on 11 held-out pairs.
 
 ## Verdict
 
+**Rejected on human review (2026-11-02).** Watching the clips side by side: they look generated, the events have no
+physical logic (objects break before they fall, fires start without cause), and they would teach the wrong
+things. The synthetic route is dropped; the next step uses real same-source footage instead.
+
+The numbers above, for the record:
+
 Usable for fire and falls, not yet for breaking objects or spills. Before scaling: keep only clips that
 pass review, prompt for a fixed camera, and test whether a model trained with them improves on the
 real hard set, which is the only measure that counts.
