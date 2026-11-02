@@ -3,6 +3,8 @@
     python -m ks.data.prepare oops-annotations --out data/oops
     python -m ks.data.prepare oops-videos      --out data/oops            # ~48 GB streamed + extracted
     python -m ks.data.prepare oops-normalize   --candidates data/candidates.csv --out data/norm/oops
+    python -m ks.data.prepare oops-prefail     --manifest data/manifest.csv --candidates data/candidates.csv \
+        --out data/norm/oops_prefail
     python -m ks.data.prepare charades         --out data/norm/charades --work data/tmp
     python -m ks.data.prepare epic             --out data/norm/epic
 """
@@ -85,6 +87,23 @@ def oops_normalize(candidates, out, workers):
     normalize_all([(Path(r["path"]), out / f"{r['video_id']}.mp4") for r in rows], workers)
 
 
+def prefail_jobs(manifest_rows, candidate_rows, out):
+    """(raw mirror clip, normalized destination) for the manifest's prefail negatives that live in `out`."""
+    raw = {r["video_id"]: Path(r["path"]) for r in candidate_rows}
+    out = Path(out)
+    return [(raw[r["video_id"]], out / f"{r['video_id']}.mp4") for r in manifest_rows
+            if r["source"] == "oops" and str(r["label"]) == "0" and Path(r["path"]).parent == out]
+
+
+def oops_prefail(manifest, candidates, out, workers):
+    out.mkdir(parents=True, exist_ok=True)
+    with open(manifest) as f, open(candidates) as g:
+        jobs = prefail_jobs(list(csv.DictReader(f)), list(csv.DictReader(g)), out)
+    failed = normalize_all(jobs, workers)
+    if failed:
+        print("failed:", *failed, sep="\n  ")
+
+
 def charades(out, work, workers):
     out.mkdir(parents=True, exist_ok=True)
     work.mkdir(parents=True, exist_ok=True)
@@ -125,10 +144,12 @@ def epic(out, workers, per_participant):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("job", choices=["oops-annotations", "oops-videos", "oops-normalize", "charades", "epic"])
+    ap.add_argument("job", choices=["oops-annotations", "oops-videos", "oops-normalize", "oops-prefail", "charades",
+                                    "epic"])
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--work", type=Path, default=Path("data/tmp"))
     ap.add_argument("--candidates", type=Path)
+    ap.add_argument("--manifest", type=Path, help="oops-prefail: normalize this manifest's prefail clips")
     ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 4))
     ap.add_argument("--per-participant", type=int, default=1)
     a = ap.parse_args()
@@ -138,6 +159,8 @@ def main():
         oops_videos(a.out)
     elif a.job == "oops-normalize":
         oops_normalize(a.candidates, a.out, a.workers)
+    elif a.job == "oops-prefail":
+        oops_prefail(a.manifest, a.candidates, a.out, a.workers)
     elif a.job == "charades":
         charades(a.out, a.work, a.workers)
     else:

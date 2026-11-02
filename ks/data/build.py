@@ -21,7 +21,8 @@ PREFAIL_MARGIN = 1.5  # s before the Oops failure marker; 95% of labeled warning
 MIN_PREFAIL = 2.0  # one full window
 
 
-def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed, folds=FOLDS):
+def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed, folds=FOLDS, prefail="kitchen",
+                   prefail_margin=PREFAIL_MARGIN, prefail_dir=None):
     """`labels` maps video_id -> latest main-pass label row (see ks.label.server.latest_labels)."""
     rows = []
     for c in candidates:
@@ -29,13 +30,15 @@ def build_manifest(candidates, labels, negatives, oops_dir, exclude, seed, folds
         if c["video_id"] in exclude:
             continue
         if label is None or label["decision"] != "keep":
-            # A kitchen clip we didn't keep is still normal activity until its failure starts: negatives in
-            # the positives' own YouTube style, so "looks like a fail compilation" stops predicting danger.
+            # A clip we didn't keep is still normal activity until its failure starts: negatives in the
+            # positives' own YouTube style, so "looks like a fail compilation" stops predicting danger.
+            # prefail="kitchen" takes unkept kitchen candidates only, "all" every Oops clip with a marker.
             marker = float(c.get("oops_event") or "nan")
-            if str(c.get("candidate")) == "True" and marker - PREFAIL_MARGIN >= MIN_PREFAIL:
-                rows.append({"video_id": c["video_id"], "source": "oops", "path": f"{oops_dir}/{c['video_id']}.mp4",
-                             "view": "mixed", "group": c["group"], "label": 0, "events": "[]",
-                             "duration": marker - PREFAIL_MARGIN})
+            scope_ok = prefail == "all" or str(c.get("candidate")) == "True"
+            if scope_ok and marker - prefail_margin >= MIN_PREFAIL:
+                rows.append({"video_id": c["video_id"], "source": "oops",
+                             "path": f"{prefail_dir or oops_dir}/{c['video_id']}.mp4", "view": "mixed",
+                             "group": c["group"], "label": 0, "events": "[]", "duration": marker - prefail_margin})
             continue
         rows.append({
             "video_id": c["video_id"], "source": "oops", "path": f"{oops_dir}/{c['video_id']}.mp4", "view": "mixed",
@@ -77,6 +80,10 @@ def main():
     ap.add_argument("--oops-dir", required=True)
     ap.add_argument("--pasbench-meta", help="PaSBench-Video test/metadata.csv; its Oops clips are held out")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--prefail", choices=["kitchen", "all"], default="kitchen",
+                    help="which unkept Oops clips give their footage before the failure as negatives")
+    ap.add_argument("--prefail-margin", type=float, default=PREFAIL_MARGIN)
+    ap.add_argument("--prefail-dir", help="where those clips are normalized (default: --oops-dir)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
 
@@ -85,7 +92,8 @@ def main():
         with open(a.pasbench_meta, encoding="utf-8-sig") as f:
             exclude = {PurePosixPath(r["file_name"]).stem for r in csv.DictReader(f) if r["dataset"] == "oops"}
     df = build_manifest(read_csv(a.candidates), latest_labels(read_csv(a.labels)),
-                        [n for p in a.negatives for n in read_csv(p)], a.oops_dir, exclude, a.seed)
+                        [n for p in a.negatives for n in read_csv(p)], a.oops_dir, exclude, a.seed,
+                        prefail=a.prefail, prefail_margin=a.prefail_margin, prefail_dir=a.prefail_dir)
     errors = validate(df)
     if errors:
         raise SystemExit("manifest invalid:\n" + "\n".join(errors[:20]))

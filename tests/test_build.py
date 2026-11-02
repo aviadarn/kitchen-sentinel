@@ -105,3 +105,22 @@ def test_adding_youtube_negatives_leaves_the_positives_folds_unchanged():
     pos = without[without.label == 1].index
     assert (with_neg.loc[pos, "fold"] == without.loc[pos, "fold"]).all()
     assert with_neg[with_neg.label == 1].groupby("fold").size().tolist() == [2] * 5
+
+
+def test_prefail_from_every_oops_clip_with_its_own_margin_and_folder():
+    # The full mirror has ~2,000 clips with 3 s of calm footage before their failure, mostly not kitchens.
+    cands = CANDIDATES + [
+        {"video_id": "Comp G1", "group": "Comp G", "oops_event": "9.0", "candidate": "False"},  # not a kitchen
+        {"video_id": "Comp H1", "group": "Comp H", "oops_event": "4.5", "candidate": "False"},  # 1.5 s left: too short
+    ]
+    df = build(candidates=cands, prefail="all", prefail_margin=3.0, prefail_dir="n/prefail").set_index("video_id")
+    g = df.loc["Comp G1"]
+    assert (g.source, g.label, g.duration, g.path) == ("oops", 0, 6.0, "n/prefail/Comp G1.mp4")
+    assert "Comp H1" not in df.index
+    assert df.loc["Comp A0", "label"] == 1  # kept clips stay positives, never prefail
+    assert validate(df.reset_index()) == []
+
+
+def test_kitchen_only_prefail_stays_the_default():
+    cands = CANDIDATES + [{"video_id": "Comp G1", "group": "Comp G", "oops_event": "9.0", "candidate": "False"}]
+    assert "Comp G1" not in set(build(candidates=cands).video_id)

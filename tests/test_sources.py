@@ -69,3 +69,19 @@ def test_frames_at_returns_one_rgb_frame_per_fraction(tmp_path):
     assert all(f.mode == "RGB" for f in frames)
     # testsrc draws a running clock: frames from different times must differ.
     assert frames[0].tobytes() != frames[2].tobytes()
+
+
+def test_prefail_jobs_normalize_each_manifest_prefail_clip_from_its_raw_mirror_file(tmp_path):
+    from pathlib import Path
+
+    from ks.data.prepare import prefail_jobs
+
+    manifest = [
+        {"video_id": "Comp G1", "source": "oops", "label": "0", "path": f"{tmp_path}/prefail/Comp G1.mp4"},
+        {"video_id": "Comp A0", "source": "oops", "label": "1", "path": f"{tmp_path}/oops/Comp A0.mp4"},
+        {"video_id": "charades:X", "source": "charades", "label": "0", "path": f"{tmp_path}/ch/X.mp4"},
+    ]
+    candidates = [{"video_id": "Comp G1", "path": "data/oops/oops_video/train/Comp G1.mp4"},
+                  {"video_id": "Comp A0", "path": "data/oops/oops_video/train/Comp A0.mp4"}]
+    jobs = prefail_jobs(manifest, candidates, tmp_path / "prefail")
+    assert jobs == [(Path("data/oops/oops_video/train/Comp G1.mp4"), tmp_path / "prefail" / "Comp G1.mp4")]
