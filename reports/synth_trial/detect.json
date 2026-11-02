@@ -1,0 +1,13 @@
+{
+  "vjepa_generated_vs_real_auc": 0.8251549586776861,
+  "vjepa_safe_vs_real_auc": 0.6740702479338843,
+  "vjepa_accident_vs_safe_auc": 0.8073347107438017,
+  "siglip_generated_vs_real_auc": 0.6962809917355371,
+  "siglip_safe_vs_real_auc": 0.6394628099173554,
+  "siglip_accident_vs_safe_auc": 0.9034090909090909,
+  "windows": {
+    "real": 44,
+    "safe": 44,
+    "accident": 44
+  }
+}
