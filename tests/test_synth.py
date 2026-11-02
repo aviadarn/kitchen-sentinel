@@ -51,3 +51,18 @@ def test_held_out_auc_is_high_for_separable_features_and_near_chance_for_noise()
     noise = rng.normal(0, 1, (80, 5))
     assert held_out_auc(separable, y, groups) > 0.95
     assert 0.3 < held_out_auc(noise, y, groups) < 0.7
+
+
+def test_save_video_writes_float_frames_as_h264_at_the_given_rate(tmp_path):
+    import av
+    import numpy as np
+
+    from ks.synth.wan_pairs import save_video
+
+    frames = np.random.default_rng(0).random((12, 64, 96, 3)).astype(np.float32)  # diffusers' np output
+    save_video(frames, tmp_path / "out.mp4", fps=24)
+    with av.open(str(tmp_path / "out.mp4")) as c:
+        stream = c.streams.video[0]
+        rate = stream.average_rate
+        assert (stream.width, stream.height, rate.numerator / rate.denominator) == (96, 64, 24)
+        assert sum(1 for _ in c.decode(video=0)) == 12

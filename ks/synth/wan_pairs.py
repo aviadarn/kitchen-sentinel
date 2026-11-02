@@ -64,6 +64,24 @@ def source_frame(path, t):
     raise ValueError(f"{path} has no frame at {t:.2f} s")
 
 
+def save_video(frames, path, fps=24):
+    """H.264 mp4 from frames as diffusers returns them: floats in [0, 1] (T, H, W, 3), or PIL images."""
+    import av
+    import numpy as np
+
+    frames = [np.asarray(f) for f in frames]
+    if frames[0].dtype != np.uint8:
+        frames = [(np.clip(f, 0, 1) * 255).round().astype(np.uint8) for f in frames]
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("libx264", rate=fps)
+        stream.height, stream.width = frames[0].shape[:2]
+        stream.pix_fmt = "yuv420p"
+        stream.options = {"crf": "17"}
+        for f in frames:
+            container.mux(stream.encode(av.VideoFrame.from_ndarray(f, format="rgb24")))
+        container.mux(stream.encode())
+
+
 def write_gallery(jobs, out):
     """index.html in `out`: per pair, the real start frame beside the safe and accident continuations."""
     rows = []
@@ -100,7 +118,6 @@ def main():
 
     import torch
     from diffusers import AutoencoderKLWan, WanImageToVideoPipeline
-    from diffusers.utils import export_to_video
 
     jobs = load_jobs(a.jobs)
     if a.limit:
@@ -137,7 +154,7 @@ def main():
                               num_inference_steps=a.steps,
                               # Same seed for both twins: they share the start until the prompts diverge.
                               generator=torch.Generator("cpu").manual_seed(n)).frames[0]
-                export_to_video(frames, str(path), fps=24)
+                save_video(frames, path, fps=24)
                 seconds = time.time() - t0
                 writer.writerow([job.pair, kind, width, height, a.frames, a.steps, f"{seconds:.0f}"])
                 f.flush()
