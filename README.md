@@ -14,10 +14,14 @@ Not affiliated with Nexar.
   above its own earlier, calm moments, the frozen V-JEPA2 probe scores hard AP 0.56 against 0.47 for
   SigLIP on the window's last frame (pilot recipe, 5-fold cross-validation, 89 clips).
 - **BADAS-Open does not transfer from roads to kitchens**: AUC 0.52, chance level.
-- **Part of the signal is a shortcut.** Every accident clip is a YouTube fail compilation, and normal
-  footage comes from other datasets. On YouTube footage where nothing goes wrong, the probe and the
-  single-frame model raise 19–100 alarms per hour, against 1–2 per hour on normal cooking. Training
-  on 11 minutes of such footage halves those false alarms but does not remove them.
+- **Part of the signal was a shortcut, and real footage fixes it.** Every accident clip is a YouTube
+  fail compilation, and normal footage comes from other datasets. On YouTube footage where nothing
+  goes wrong, the probe trained the usual way raises 34 alarms an hour (the single frame 162),
+  against about 1 on normal cooking. Adding 3 hours of such footage to training (2,092 Oops clips,
+  cut 3 s before their failure) brings the probe down to 1.9 an hour while it catches accidents as
+  before (26% on time, from 28%).
+- **Generated accidents did not help.** Wan 2.2 continued real cooking frames into accidents; on
+  review they look generated and lack physical logic (`reports/synth_trial/`).
 - **The limit is data, not the model.** 89 labeled clips, a median warning of 0.43 s between "danger
   visible" and the accident, and 34 clips with no calm footage before the warning at all.
 
@@ -30,13 +34,13 @@ false alarm per hour on the validation fold's normal cooking, then applied to th
 | model | trained on YouTube normal footage | hard AP [95% CI] | caught on time | false alarms/h, normal cooking | false alarms/h, YouTube normal |
 |---|---|---|---|---|---|
 | class prior | – | 0.23 | 0% | 0.00 | 0.0 |
-| BADAS-Open zero-shot | – | 0.24 [0.18, 0.34] | 0% | 1.22 | 11.2 |
-| SigLIP last frame + LR | no | 0.47 [0.39, 0.64] | 41% | 0.95 | 100.5 |
-| SigLIP last frame + LR | yes | 0.43 [0.38, 0.68] | 33% | 2.24 | 55.8 |
-| V-JEPA2 mean token + LR | no | 0.45 [0.39, 0.62] | 7% | 0.88 | 11.2 |
-| V-JEPA2 mean token + LR | yes | 0.40 [0.33, 0.50] | 5% | 0.41 | 0.0 |
-| **V-JEPA2 probe (3 seeds)** | no | **0.56 [0.50, 0.73]** | 28% | 1.16 | 33.5 |
-| **V-JEPA2 probe (3 seeds)** | yes | 0.53 [0.45, 0.68] | 26% | 1.81 | 18.6 |
+| BADAS-Open zero-shot | – | 0.24 [0.18, 0.34] | 0% | 1.22 | 7.1 |
+| SigLIP last frame + LR | no | 0.47 [0.39, 0.64] | 41% | 0.95 | 162.1 |
+| SigLIP last frame + LR | yes | 0.50 [0.41, 0.71] | 41% | 1.36 | 8.1 |
+| V-JEPA2 mean token + LR | no | 0.45 [0.39, 0.62] | 7% | 0.88 | 37.4 |
+| V-JEPA2 mean token + LR | yes | 0.39 [0.30, 0.51] | 4% | 0.48 | 1.7 |
+| **V-JEPA2 probe (3 seeds)** | no | **0.56 [0.50, 0.73]** | 28% | 1.16 | 34.4 |
+| **V-JEPA2 probe (3 seeds)** | yes | 0.54 [0.47, 0.67] | 26% | 1.16 | **1.9** |
 
 - **Hard AP** ranks the windows inside each labeled warning (alert to accident) against the same
   clip's windows from before the alert. Source, camera and editing are held fixed, so it measures
@@ -44,35 +48,34 @@ false alarm per hour on the validation fold's normal cooking, then applied to th
 - **Caught on time**: share of the 81 accidents (those with at least one full 2 s window before them)
   whose first alarm came no earlier than 0.5 s before the labeled alert. Earlier alarms count as
   early, not caught.
-- **YouTube normal**: 125 Oops kitchen clips that were not kept, cut 1.5 s before their failure
-  marker. That is only 11 minutes, so those rates rest on a handful of alarms (probe: about 3–6,
-  SigLIP: about 10–18).
+- **YouTube normal**: 2,092 Oops clips that are not labeled accidents, kitchen or not, cut 3 s before
+  their failure marker: 178 minutes. Each fold's clips are scored by models that never trained on them.
 - Full tables, including the BADAS-style "easy" AP, time-to-accident and calibration:
-  `reports/v2_without_youtube/` and `reports/v2_with_youtube/` (`results.md`, `audit.md`).
-  `curves.png` shows risk curves for 20 random clips.
+  `reports/v3_without_youtube/` and `reports/v3_with_youtube/` (`results.md`, `audit.md`); the earlier
+  11-minute version is in `reports/v2_*`. `curves.png` shows risk curves for 20 random clips.
 
 ### What the audit found
 
 `audit.md` compares each model's scores on calm fail-clip footage (before the alert) with normal
-cooking. A model that anticipates should not tell the two apart (AUC 0.5). The single-frame model
-does, 93% of the time (88% after the fix); the probe 71% (70%). The single frame's higher catch rate
-in the pilot came largely from firing throughout fail videos. The probe fires about 15 times more
-often inside warnings than before them, against about 5 times for the single frame.
+cooking. A model that anticipates should not tell the two apart (AUC 0.5). Trained the usual way, the
+single frame does, 93% of the time, and the probe 71%. With the YouTube footage in training the probe
+drops to 66% and fires on 0.1% of calm YouTube windows (from 1.8%); the single frame stays at 91%,
+so it still recognises kitchen fail clips. The probe fires about 11 times more often inside warnings
+than before them; on hard AP its lead over the single frame shrinks to +0.04 [-0.09, +0.12].
 
 ## Limitations
 
 - One labeler. The planned blind self-agreement recheck was not run.
 - Warnings are short (median 0.43 s), so the task sits close to "spot the failure as it starts".
 - Too few clips for a fixed test split: every number is out-of-fold over 5 folds, with wide CIs.
-- The normal-cooking false-alarm rate holds in-distribution only. On footage that looks like the
-  positives but where nothing goes wrong, the probe alarms 10–30 times more often.
+- False alarms are measured on Charades, EPIC-KITCHENS and Oops footage. Real kitchens with a fixed
+  camera have not been tested.
 - Only frozen features were tried. No fine-tuning, which would likely overfit 89 clips.
 
 ## Next steps
 
 1. More and longer accident clips, cut with at least 5 s of footage before the fail.
-2. Much more same-source normal footage: about 3,300 Oops clips have at least 4 s before their failure.
-3. Only then, fine-tuning (from V-JEPA2 or BADAS-Open weights).
+2. Only then, fine-tuning (from V-JEPA2 or BADAS-Open weights).
 
 ## Pipeline
 
@@ -89,8 +92,8 @@ often inside warnings than before them, against about 5 times for the single fra
 
 The example videos contain source footage, so `demos/` stays out of git.
 
-`scripts/box_setup.sh` and `scripts/run_v2.sh` reproduce the GPU part on a rented RTX 4090: about 1 h
-of features and 1 h of CV, roughly $1. BADAS-Open is gated on Hugging Face. Accept its terms, then
+`scripts/box_setup.sh` and `scripts/run_v3.sh` reproduce the GPU part on a rented RTX 4090: about 1 h of downloads, 1 h
+of features and 1 h of CV, roughly $1.60. BADAS-Open is gated on Hugging Face. Accept its terms, then
 point `BADAS_CKPT` at a local copy of `weights/badas_open.pth`. Its checkpoint runs V-JEPA2's
 predictor 1 s into the future and feeds those tokens to the head; `Anticipator(future_fraction=...)`
 reproduces that.
