@@ -78,6 +78,9 @@ def main():
     result = {}
     for name, cols in (("vjepa", slice(0, 1024)), ("siglip", slice(1024, None))):
         result[f"{name}_generated_vs_real_auc"] = held_out_auc(x[:, cols], synth.astype(int), group)
+        calm = kind != "accident"  # does a generated twin with nothing happening still look generated?
+        result[f"{name}_safe_vs_real_auc"] = held_out_auc(x[calm][:, cols], (kind[calm] == "safe").astype(int),
+                                                          group[calm])
         result[f"{name}_accident_vs_safe_auc"] = held_out_auc(x[synth][:, cols], (kind[synth] == "accident").astype(int),
                                                               group[synth])
     result["windows"] = {k: int((kind == k).sum()) for k in ("real", "safe", "accident")}
