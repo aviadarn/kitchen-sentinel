@@ -169,8 +169,14 @@ def main():
             print(f"  scored {i + 1}/{len(rows)}", flush=True)
     emb = np.stack(emb)
 
-    oops = sorted(Path(a.oops_clips).glob("*.mp4"))
-    ref = np.stack([scorer(frames_at(p, FRACTIONS))[2] for p in oops]) if oops else np.zeros((0, emb.shape[1]))
+    oops, ref = [], []
+    for p in sorted(Path(a.oops_clips).glob("*.mp4")):
+        try:
+            ref.append(scorer(frames_at(p, FRACTIONS))[2])
+            oops.append(p)
+        except Exception as e:  # one unreadable original (it also failed to normalize) must not stop the run
+            print(f"  skipped {p.name}: {type(e).__name__}", flush=True)
+    ref = np.stack(ref) if ref else np.zeros((0, emb.shape[1]))
     dup_oops, dup_self = duplicate_of(emb, ref), within_duplicates(emb)
     np.save(out / "embeddings.npy", emb)
 
