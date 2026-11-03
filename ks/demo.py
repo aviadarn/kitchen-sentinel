@@ -145,7 +145,7 @@ def render(example, curve, tau, accidents, out_path, subtitle="", layout="tall",
     return Path(out_path)
 
 
-def _gallery(examples):
+def _gallery(examples, run=""):
     cards = []
     for kind, label in KINDS.items():
         part = examples[examples.kind == kind]
@@ -161,8 +161,8 @@ def _gallery(examples):
             ".row{display:flex;flex-wrap:wrap;gap:16px}figure{margin:0;width:420px}video{width:100%}"
             "figcaption{font-size:12px;color:#52514e}h2{font-size:16px;margin-top:28px}</style>"
             "<h1>kitchen-sentinel: example predictions</h1><p>Random examples of each outcome from the V-JEPA2 probe "
-            "(seed 0), scored out-of-fold. Grey band: labeled warning (alert to accident); vertical line: the "
-            "accident.</p>" + "".join(cards))
+            f"(seed 0), scored out-of-fold{' in ' + html.escape(run) if run else ''}. Grey band: labeled warning "
+            "(alert to accident); vertical line: the accident.</p>" + "".join(cards))
 
 
 def main():
@@ -197,7 +197,7 @@ def main():
         print(f"{name}: {ex.video_id} [{ex.start:.1f}-{ex.stop:.1f} s]", flush=True)
     examples["file"] = files
     examples.to_csv(out / "examples.csv", index=False)
-    (out / "index.html").write_text(_gallery(examples))
+    (out / "index.html").write_text(_gallery(examples, run=Path(a.run).name))
 
 
 if __name__ == "__main__":

@@ -61,3 +61,10 @@ def test_wide_layout_is_16_by_9_and_holds_the_last_frame(tmp_path):
         stream = c.streams.video[0]
         assert (stream.width, stream.height) == (960, 540)
         assert sum(1 for _ in c.decode(video=0)) == 32 + 8
+
+
+def test_gallery_says_which_run_scored_the_examples():
+    from ks.demo import _gallery
+
+    examples = pd.DataFrame([dict(kind="miss", title="clip", file="00_miss.mp4")])
+    assert "v3_with_youtube" in _gallery(examples, run="v3_with_youtube")
