@@ -20,11 +20,11 @@ SERIES = [("fa_per_h", "normal cooking (Charades, EPIC-KITCHENS)", "#2a78d6"),
 
 
 def main(out):
-    without = json.loads((REPORTS / "v2_without_youtube" / "metrics.json").read_text())
-    with_yt = json.loads((REPORTS / "v2_with_youtube" / "metrics.json").read_text())
+    without = json.loads((REPORTS / "v3_without_youtube" / "metrics.json").read_text())
+    with_yt = json.loads((REPORTS / "v3_with_youtube" / "metrics.json").read_text())
     rows = [("single frame (SigLIP)", without["siglip_lr"]),
             ("video model (V-JEPA2 probe)", without["probe"]),
-            ("video model, also trained on\n11 min of calm YouTube footage", with_yt["probe"])]
+            ("video model, also trained on\n3 h of calm YouTube footage", with_yt["probe"])]
 
     plt.rcParams.update({"font.family": "sans-serif", "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
                          "font.size": 9, "axes.edgecolor": INK["axis"], "xtick.color": INK["muted"],
@@ -32,16 +32,17 @@ def main(out):
     fig, ax = plt.subplots(figsize=(8.5, 3.4), dpi=200, facecolor=INK["surface"])
     ax.set_facecolor(INK["surface"])
     height, gap = 0.3, 0.02
+    ax_pad = max(m[k] for _, m in rows for k, _, _ in SERIES) * 0.012
     for i, (_, metrics) in enumerate(rows):
         for j, (key, _, color) in enumerate(SERIES):
             y = i + (j - 0.5) * (height + gap)
             value = metrics[key]
             ax.barh(y, value, height=height, color=color, linewidth=0)
-            ax.text(value + 1.2, y, f"{value:.1f}", va="center", fontsize=8.5, color=INK["primary"])
+            ax.text(value + ax_pad, y, f"{value:.1f}", va="center", fontsize=8.5, color=INK["primary"])
     ax.set_yticks(range(len(rows)), [label for label, _ in rows])
     ax.invert_yaxis()
     ax.tick_params(axis="y", length=0)
-    ax.set_xlim(0, 112)
+    ax.set_xlim(0, max(m[k] for _, m in rows for k, _, _ in SERIES) * 1.1)
     ax.set_xlabel("false alarms per hour, at the threshold set for at most 1 per hour on normal cooking",
                   color=INK["secondary"])
     ax.grid(axis="x", color=INK["grid"], linewidth=0.8)

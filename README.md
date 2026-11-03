@@ -101,7 +101,10 @@ reproduces that.
 ## Data rights
 
 This repo never contains video. It publishes manifests (video IDs + timestamps), labels, code and
-metrics only. The source datasets are Oops! (unofficial mirror, no license), EPIC-KITCHENS-100
+metrics only.
+`labels/oops_kitchen_labels.csv` is a snapshot of the hand labels: 666 Oops clips, each kept or
+rejected, with alert and accident times and a hazard type per accident (one labeler). The labeling
+tool writes to `data/labels.csv`. The source datasets are Oops! (unofficial mirror, no license), EPIC-KITCHENS-100
 (CC BY-NC 4.0), Charades (non-commercial research) and PaSBench-Video (CC BY-NC 4.0). Use them for
 research only.
 
