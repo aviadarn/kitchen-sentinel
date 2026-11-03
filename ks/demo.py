@@ -119,7 +119,10 @@ def render(example, curve, tau, accidents, out_path, subtitle="", layout="tall",
             ax.text(event, 1 - P_FLOOR, " accident", fontsize=6.5, va="top", ha="left", color=INK["primary"])
     ax.axhline(tau, color=INK["secondary"], linewidth=0.8)
     ax.text(example.start, tau, " alarm threshold", fontsize=6.5, va="bottom", ha="left", color=INK["secondary"])
-    line, = ax.plot([], [], color=INK["series"], linewidth=2, solid_capstyle="round", solid_joinstyle="round")
+    # A clip with only a window or two would draw no visible line, so its scores get dots.
+    marker = dict(marker="o", markersize=8, markeredgecolor=INK["surface"], markeredgewidth=2) if len(curve) < 3 else {}
+    line, = ax.plot([], [], color=INK["series"], linewidth=2, solid_capstyle="round", solid_joinstyle="round",
+                    **marker)
     cursor = ax.axvline(example.start, color=INK["grid"], linewidth=1.6)
     fig.text(*box["note"], subtitle, fontsize=6.5, color=INK["muted"])
 
