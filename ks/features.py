@@ -130,7 +130,8 @@ def extract(index, encode, specs, out_dir, decode=decode_frames, max_windows=64,
 
 
 class Encoders:
-    """Frozen V-JEPA2 tokens, BADAS-Open zero-shot score and SigLIP last-frame embedding in one call."""
+    """Frozen V-JEPA2 tokens, BADAS-Open zero-shot score and SigLIP last-frame embedding in one call;
+    optionally the Cosmos3 Reasoner's zero-shot yes/no score."""
 
     def __init__(self, names, device, batch=16, spatial_pool=2, siglip=None):
         from transformers import AutoModel, AutoProcessor, AutoVideoProcessor, VJEPA2Model
@@ -139,7 +140,8 @@ class Encoders:
 
         self.names, self.device, self.batch = names, device, batch
         self.specs = {}
-        self.video_processor = AutoVideoProcessor.from_pretrained(BACKBONE)
+        if "vjepa" in names or "badas" in names:
+            self.video_processor = AutoVideoProcessor.from_pretrained(BACKBONE)
         if "vjepa" in names:
             self.vjepa = Anticipator(VJEPA2Model.from_pretrained(BACKBONE), spatial_pool=spatial_pool).to(device).eval()
             grid = NUM_FRAMES // self.vjepa.backbone.config.tubelet_size * (self.vjepa.hw[0] // spatial_pool) ** 2
@@ -151,10 +153,15 @@ class Encoders:
             self.siglip = AutoModel.from_pretrained(siglip or SIGLIP).to(device).eval()
             self.siglip_processor = AutoProcessor.from_pretrained(siglip or SIGLIP)
             self.specs["siglip"] = ((self.siglip.config.vision_config.hidden_size,), np.float16)
+        if "cosmos" in names:
+            from ks.models.cosmos_reasoner import CosmosReasoner
+
+            self.cosmos = CosmosReasoner(device, batch=batch, src_fps=FPS)
+            self.specs.update(CosmosReasoner.specs)
 
     @torch.no_grad()
     def __call__(self, windows):
-        out = {name: [] for name in self.specs}
+        out = {name: [] for name in self.specs if not name.startswith("cosmos")}
         for i in range(0, len(windows), self.batch):
             clips = windows[i:i + self.batch].permute(0, 1, 4, 2, 3)  # (n, T, C, H, W)
             with torch.autocast(self.device, dtype=torch.bfloat16, enabled=self.device == "cuda"):
@@ -170,7 +177,10 @@ class Encoders:
                     images = self.siglip_processor(images=clips[:, -1], return_tensors="pt", device=self.device)
                     emb = self.siglip.get_image_features(pixel_values=images["pixel_values"]).pooler_output
                     out["siglip"].append(emb.half().cpu())
-        return {name: torch.cat(parts).numpy() for name, parts in out.items()}
+        out = {name: torch.cat(parts).numpy() for name, parts in out.items()}
+        if "cosmos" in self.names:
+            out.update(self.cosmos(windows))  # batches on its own: a video-language model, not a video encoder
+        return out
 
 
 SIGLIP = "google/siglip-so400m-patch14-384"

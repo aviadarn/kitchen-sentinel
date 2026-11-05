@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from ks.eval.cv import report, run_cv, summarize, train_rows
+from ks.eval.cv import report, run_cv, summarize, train_rows, zero_shot
 from ks.features import feature_index
 
 
@@ -135,3 +135,24 @@ def test_train_rows_can_leave_a_negative_stratum_out():
     rng = np.random.default_rng(0)
     assert "y0" in set(index.loc[train_rows(index, 100, rng)].video_id)
     assert "y0" not in set(index.loc[train_rows(index, 100, rng, exclude=("oops",))].video_id)
+
+
+def test_zero_shot_scores_match_run_cv_for_a_model_used_as_is(tmp_path):
+    # A zero-shot model's per-window scores are added to an earlier run without retraining anything,
+    # with the same val/test rows per round that run_cv gives BADAS-Open
+    index, feats = synthetic()
+    scores = run_cv(index, feats, folds=5, seeds=[0], max_per_stratum=200, device="cpu",
+                    probe_kw=dict(steps=20, batch=32, eval_every=10, hidden_size=8, num_heads=2, head_hidden=16),
+                    lr_grid=(0.1,))
+    badas = scores[scores.method == "badas"].reset_index(drop=True)
+    again = zero_shot(index, feats["badas"], "badas", folds=5)
+    pd.testing.assert_frame_equal(again, badas, check_dtype=False)
+
+
+def test_zero_shot_skips_windows_the_index_leaves_out():
+    # ks.eval.cv drops undone windows; their rows must not be scored
+    index, feats = synthetic()
+    kept = index.iloc[::2]
+    s = zero_shot(kept, feats["badas"], "cosmos", folds=5)
+    assert set(s.row) == set(kept.index)
+    assert np.allclose(s.score, feats["badas"][s.row])

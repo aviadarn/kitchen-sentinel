@@ -5,6 +5,7 @@ pre-alert AUC: pre-alert windows of fail clips vs normal-cooking windows (0.5 = 
 | method | pre-alert AUC | pre-alert | gap | warning | after | youtube | charades | epic |
 |---|---|---|---|---|---|---|---|---|
 | badas | 0.682 | 0.000 | 0.000 | 0.000 | 0.000 | 0.004 | 0.000 | 0.000 |
+| cosmos | 0.782 | 0.011 | 0.008 | 0.110 | 0.153 | 0.020 | 0.000 | 0.000 |
 | prior | 0.500 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 | 0.000 |
 | probe | 0.659 | 0.020 | 0.082 | 0.228 | 0.094 | 0.001 | 0.000 | 0.000 |
 | siglip_lr | 0.910 | 0.075 | 0.107 | 0.301 | 0.212 | 0.004 | 0.000 | 0.000 |

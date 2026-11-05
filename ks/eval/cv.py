@@ -26,7 +26,18 @@ from ks.train import balance_weights, fold_roles, negative_stratum, score, train
 EASY_OFFSETS = (0.25, 0.5, 1.0)  # labeled warnings are short (median 0.43 s), so BADAS's 0.5/1.0/1.5 shift down
 MAX_FA_PER_HOUR = 1.0
 EARLY_GAP = 0.5  # same margin as the training labels' pre-alert gap
-METHODS = ["prior", "badas", "siglip_lr", "vjepa_lr", "probe"]
+METHODS = ["prior", "badas", "cosmos", "siglip_lr", "vjepa_lr", "probe"]
+
+
+def zero_shot(index, values, method, folds=5):
+    """Rows for a model used as is: every round's val and test windows get their `values` row."""
+    out = []
+    for k in range(folds):
+        roles = index.fold.map(fold_roles(folds, k))
+        ev = index.index[roles.isin(["val", "test"])].to_numpy()
+        out.append(pd.DataFrame(dict(row=ev, method=method, seed=0, fold=k, role=roles[ev].to_numpy(),
+                                     score=np.asarray(values[ev], dtype=float))))
+    return pd.concat(out, ignore_index=True)
 
 
 def train_rows(index, max_per_stratum, rng, exclude=()):
@@ -255,14 +266,25 @@ def main():
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--steps", type=int, default=2000)
     ap.add_argument("--train-without", nargs="*", default=[], help="negative strata kept out of training, e.g. oops")
+    ap.add_argument("--add-zero-shot", nargs="*", default=[],
+                    help="score files in --features (e.g. cosmos) to add to an earlier run's --scores as zero-shot "
+                         "methods, without retraining anything")
+    ap.add_argument("--scores", help="scores.csv of the earlier run, for --add-zero-shot")
     a = ap.parse_args()
 
     index = pd.read_csv(Path(a.features) / "index.csv")
     done = np.load(Path(a.features) / "done.npy")
     index = index[done]
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    scores = run_cv(index, load_features(a.features, device), folds=a.folds, seeds=a.seeds, device=device,
-                    probe_kw=dict(steps=a.steps), train_exclude=a.train_without, log=lambda s: print(s, flush=True))
+    if a.add_zero_shot:
+        scores = pd.read_csv(a.scores)
+        scores = scores[scores.row.isin(index.index) & ~scores.method.isin(a.add_zero_shot)]
+        added = [zero_shot(index, np.load(Path(a.features) / f"{name}.npy"), name, a.folds) for name in a.add_zero_shot]
+        scores = pd.concat([scores, *added], ignore_index=True)
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        scores = run_cv(index, load_features(a.features, device), folds=a.folds, seeds=a.seeds, device=device,
+                        probe_kw=dict(steps=a.steps), train_exclude=a.train_without,
+                        log=lambda s: print(s, flush=True))
     Path(a.out).mkdir(parents=True, exist_ok=True)
     scores.to_csv(Path(a.out) / "scores.csv", index=False)
     report(scores, index, a.out)
