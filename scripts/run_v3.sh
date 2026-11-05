@@ -8,8 +8,11 @@ cd /workspace/kitchen-sentinel
 source .box_env
 W=${WORKERS:-16}
 uv run python -m ks.data.prepare oops-videos --out data/oops &
+oops=$!
 uv run python -m ks.data.prepare charades --out data/norm/charades --work data/tmp --workers "$W" &
-wait
+charades=$!
+wait $oops  # per pid: a bare `wait` returns 0 even when a job failed
+wait $charades
 uv run python -m ks.data.prepare oops-normalize --candidates data/candidates.csv --out data/norm/oops --workers "$W"
 uv run python -m ks.data.build --candidates data/candidates.csv --labels data/labels.csv \
   --negatives data/norm/epic/negatives.csv data/norm/charades/negatives.csv --oops-dir data/norm/oops \

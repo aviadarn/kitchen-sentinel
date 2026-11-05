@@ -117,7 +117,9 @@ def charades(out, work, workers):
 
     video_zip = work / "Charades_v1_480.zip"
     if not video_zip.exists():
-        sh(f"curl -sL -o '{video_zip}.part' '{CHARADES_480_URL}' && mv '{video_zip}.part' '{video_zip}'")
+        # 16 GB from S3: a reset connection once cost a whole run, so resume (-C -) and retry
+        sh(f"curl -sL --retry 10 --retry-all-errors -C - -o '{video_zip}.part' '{CHARADES_480_URL}' "
+           f"&& mv '{video_zip}.part' '{video_zip}'")
     raw = work / "charades_raw"
     with zipfile.ZipFile(video_zip) as z:
         for r in rows:
